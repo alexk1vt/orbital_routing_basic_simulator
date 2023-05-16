@@ -886,7 +886,8 @@ def find_route_dijkstra(src, dest):
 def main ():
     time_scale = load.timescale()
     #tle_path = '/home/alexk1/Documents/satellite_data/starlink_9MAY23.txt'
-    tle_path = '/home/alexk1/Documents/satellite_data/STARLINK-1071.txt'
+    #tle_path = '/home/alexk1/Documents/satellite_data/STARLINK-1071.txt'
+    tle_path = './STARLINK-1071.txt'
     #starlink_url = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle'   
 
     satellites = load.tle_file(tle_path)
