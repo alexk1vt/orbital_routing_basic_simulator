@@ -1,12 +1,11 @@
 from skyfield.api import EarthSatellite, load, wgs84
 from sgp4.api import Satrec, WGS72
-from sgp4.conveniences import dump_satrec
-import pandas as pd
+#from sgp4.conveniences import dump_satrec
+#import pandas as pd
 import random
 from datetime import date, timedelta
 from math import pi, floor
-
-from sys import stdout
+import time
 
 # for plotting orbits
 import numpy as np
@@ -23,10 +22,12 @@ testing = False
 orbit_list = []
 sat_object_list = []
 cur_time = 0
+num_sats = 0
 
 # Time variables
 time_scale = 0
 time_interval = 1 # interval between time increments, measured in seconds
+secs_per_km = 0.0000033
 
 # Orbit characteristics
 sats_per_orbit = 22
@@ -131,13 +132,13 @@ class routing_sat:
 
     def get_sat_North(self):
         first_target_satnum = self.satnum - 1
-        second_target_satnum = self.satnum + 2
+        second_target_satnum = self.satnum + 1
         first_target_orbit_number = floor(first_target_satnum / sats_per_orbit)
         second_target_orbit_number = floor(second_target_satnum / sats_per_orbit)
         if first_target_orbit_number != self.orbit_number:
             first_target_satnum = (self.orbit_number * sats_per_orbit) + (first_target_satnum % sats_per_orbit)
         if second_target_orbit_number != self.orbit_number:
-            second_target_orbit_number = (self.orbit_number * sats_per_orbit) + (second_target_orbit_number % sats_per_orbit)
+            second_target_satnum = (self.orbit_number * sats_per_orbit) + (second_target_orbit_number % sats_per_orbit)
         self_lat, _ = wgs84.latlon_of(self.sat.at(cur_time))
         first_target_routing_sat = get_routing_sat_obj_by_satnum(first_target_satnum)
         first_target_lat, _ = wgs84.latlon_of(first_target_routing_sat.sat.at(cur_time))
@@ -149,22 +150,20 @@ class routing_sat:
         else:
             target_satnum = second_target_satnum
             target_lat = second_target_lat
-        #print(f"\tSelf latitude: {self_lat.degrees}\n\tTarget latitude: {first_target_lat.degrees}")
         if target_lat.degrees < self_lat.degrees:
-            print(f'Currently Northernmost satellite in this orbit')
+
             return None
-        #print(f'Satnum of satellite to the North: {target_satnum}')
         return sat_object_list[target_satnum]
 
     def get_sat_South(self):
         first_target_satnum = self.satnum - 1
-        second_target_satnum = self.satnum + 2
+        second_target_satnum = self.satnum + 1
         first_target_orbit_number = floor(first_target_satnum / sats_per_orbit)
         second_target_orbit_number = floor(second_target_satnum / sats_per_orbit)
         if first_target_orbit_number != self.orbit_number:
             first_target_satnum = (self.orbit_number * sats_per_orbit) + (first_target_satnum % sats_per_orbit)
         if second_target_orbit_number != self.orbit_number:
-            second_target_orbit_number = (self.orbit_number * sats_per_orbit) + (second_target_orbit_number % sats_per_orbit)
+            second_target_satnum = (self.orbit_number * sats_per_orbit) + (second_target_orbit_number % sats_per_orbit)
         self_lat, _ = wgs84.latlon_of(self.sat.at(cur_time))
         first_target_routing_sat = get_routing_sat_obj_by_satnum(first_target_satnum)
         first_target_lat, _ = wgs84.latlon_of(first_target_routing_sat.sat.at(cur_time))
@@ -176,11 +175,8 @@ class routing_sat:
         else:
             target_satnum = second_target_satnum
             target_lat = second_target_lat
-        #print(f"\tSelf latitude: {self_lat.degrees}\n\tTarget latitude: {first_target_lat.degrees}")
         if target_lat.degrees > self_lat.degrees:
-            print(f'Currently Southernmost satellite in this orbit')
             return None
-        #print(f'Satnum of satellite to the South: {target_satnum}')
         return sat_object_list[target_satnum]
 # End Routing sat class
 
@@ -191,6 +187,7 @@ def get_routing_sat_obj_by_satnum(satnum):
     for routing_sat_obj in sat_object_list:
         if routing_sat_obj.sat.model.satnum == satnum:
             return routing_sat_obj
+    print(f'No satellite found for satnum: {satnum} - number of satellites: {len(sat_object_list)}')
     return None
 
 
@@ -715,42 +712,38 @@ def find_route_random(src, dest):
 
     cur_routing_sat = r_sat
     sat_traverse_list = []
+    link_distance = 0
+    start = time.process_time()
     while True:
         sat_traverse_list.append(cur_routing_sat.sat.model.satnum)
-        #print(f"Current satnum: {cur_routing_sat.sat.model.satnum}")
         if cur_routing_sat.is_overhead_of(dest):
-            print('Made it to London.  Jolly good')
+            print('Made it to Destination')
             break
-        go_North = not cur_routing_sat.is_North_of(dest)
-        NS_dir = 'North' if go_North else 'South'
-        #print(f"Satellite {cur_routing_sat.sat.model.satnum} is {NS_dir} of London")            
+        go_North = not cur_routing_sat.is_North_of(dest)     
         go_East = not cur_routing_sat.is_East_of(dest)
-        EW_dir = 'East' if go_East else 'West'
-        #print(f"Satellite {cur_routing_sat.sat.model.satnum} is {EW_dir} of London")
 
         go_lat = random.randint(0,1)
 
         topo_diff = (cur_routing_sat.sat - dest).at(cur_time)
         _, _, dist = topo_diff.altaz()
-        lat_lon_dir = 'Latitude' if go_lat else 'Longitude'
-        #print(f'\n Next hop is for {lat_lon_dir}.  London is {dist.km:.1f}km away')
-        #input("Press Enter to continue...")
 
         if go_lat:
             go_lat = False
             if go_North:
-                cur_routing_sat = cur_routing_sat.get_sat_North()
+                next_routing_sat = cur_routing_sat.get_sat_North()
             else:
-                cur_routing_sat = cur_routing_sat.get_sat_South()
+                next_routing_sat = cur_routing_sat.get_sat_South()
         else:
             go_lat = True
             if go_East:
-                cur_routing_sat = cur_routing_sat.get_sat_East()
+                next_routing_sat = cur_routing_sat.get_sat_East()
             else:
-                cur_routing_sat = cur_routing_sat.get_sat_West()
-        
-    print(f'Made {len(sat_traverse_list)} satellite hops to get to destination')
-    draw_static_plot(sat_traverse_list, title=f'Random: {len(sat_traverse_list)} satellite hops to destination')
+                next_routing_sat = cur_routing_sat.get_sat_West()
+        link_distance += get_sat_distance(cur_routing_sat.sat.at(cur_time), next_routing_sat.sat.at(cur_time))
+        cur_routing_sat = next_routing_sat
+    compute_time = time.process_time() - start
+    print(f'Made {len(sat_traverse_list)} satellite hops to get to destination; distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time: {compute_time}')
+    draw_static_plot(sat_traverse_list, title=f'Random: {len(sat_traverse_list)} satellite hops; distance {link_distance:.2f}km')
 
 def find_route_dijkstra(src, dest):
     # Find satellite at least 60 deg above the horizon at source and destination
@@ -785,6 +778,7 @@ def find_route_dijkstra(src, dest):
     cur_sat_dist = 0
     route_found = False
 
+    start = time.process_time()
     while True:
         #North neighbor (what if there is no North neighbor?)
         neigh_North = cur_sat.get_sat_North()
@@ -867,20 +861,22 @@ def find_route_dijkstra(src, dest):
     #print(visited_sat_dict)
     print(f'Visited list has {len(visited_sat_dict)} entries')
     traverse_list = [dest_routing_sat.sat.model.satnum]
-    next_hop_satnum = None
-    #next_hop_dist = float('inf')
     cur_satnum = dest_routing_sat.sat.model.satnum
+    link_distance = 0
     while True:
         next_hop = visited_sat_dict[cur_satnum][1]
+        link_distance += get_sat_distance(get_routing_sat_obj_by_satnum(cur_satnum).sat.at(cur_time), get_routing_sat_obj_by_satnum(next_hop).sat.at(cur_time))
         traverse_list.insert(0, next_hop)
         if next_hop == src_routing_sat.sat.model.satnum:
             break
         cur_satnum = next_hop
-    print(f"Path has {len(traverse_list)} hops")
+
+    compute_time = time.process_time() - start
+    print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
 
     #for key in visited_sat_dict.keys():
     #    traverse_list.append(key)
-    draw_static_plot(traverse_list, title=f'Dijkstra: {len(traverse_list)} satellite hops to destination')
+    draw_static_plot(traverse_list, title=f'Dijkstra: {len(traverse_list)} hops, {link_distance:.2f}km distance')
     
         
 def main ():
@@ -1007,6 +1003,7 @@ def main ():
         
         orbit_list.append(orbit)
 
+    num_sats = orbit_cnt * sats_per_orbit
     print(f'Orbit list has {len(orbit_list)} orbits')
 
     """
@@ -1033,14 +1030,15 @@ def main ():
 
     # ---------- ROUTING ------------   
 
-    blacksburg = wgs84.latlon(+37.2296, -80.4139)
-    print(f'Blacksburgs position: {blacksburg}')
-
+    blacksburg = wgs84.latlon(+37.2296, -80.4139) #37.2296deg N, 80.4139deg W
     london = wgs84.latlon(+51.5072, -0.1276)
-    print(f'London position: {london}')
+    sydney = wgs84.latlon(-33.8688, 151.2093) #33.8688deg S, 151.2093deg E
 
     src = blacksburg
-    dest = london
+    dest = sydney
+
+    print(f'Source position: {src}')
+    print(f'Destination position: {dest}')
 
     find_route_random(src, dest)
 
