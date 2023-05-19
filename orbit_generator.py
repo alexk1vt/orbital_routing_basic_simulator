@@ -23,6 +23,7 @@ orbit_list = []
 sat_object_list = []
 cur_time = 0
 num_sats = 0
+eph = None
 
 # Time variables
 time_scale = 0
@@ -178,6 +179,28 @@ class routing_sat:
         if target_lat.degrees > self_lat.degrees:
             return None
         return sat_object_list[target_satnum]
+    
+    def find_cur_pos_diff(self, route_sat2):
+        sat1_vec = self.sat.at(cur_time)
+        sat2_vec = route_sat2.sat.at(cur_time)
+        sat_diff_vec = sat2_vec - sat1_vec
+        print(f'Satellite difference vector position: {sat_diff_vec.position}; velocity: {sat_diff_vec.velocity}')
+
+    def find_cur_pos_diff_spherical(self, route_sat2):
+        global eph
+        if eph == None:
+            eph = load('de421.bsp')
+        earth = eph['earth']
+        self_pos = earth.at(cur_time).observe(self.sat)
+        sat2_pos = earth.at(cur_time).observe(route_sat2.sat)
+        self_ra, self_dec, self_distance = self_pos.radec()
+        sat2_ra, sat2_dec, sat2_distance = sat2_pos.radec()
+        print(f"Spherical position of self_sat:\n\tright ascension: {self_ra}\n\tdeclination: {self_dec}\n\tdistance: {self_distance}")
+        print(f"Spherical position of sat2:\n\tright ascension: {sat2_ra}\n\tdeclination: {sat2_dec}\n\tdistance: {sat2_distance}")
+        pos_diff = sat2_pos - self_pos
+        diff_ra, diff_dec, diff_distance = pos_diff.radec()
+        print(f"\nSpherical position difference of self_sat and sat2:\n\tright ascension: {diff_ra}\n\tdeclination: {diff_dec}\n\tdistance:{diff_distance}")
+
 # End Routing sat class
 
 ## :: General Functions ::
@@ -1040,9 +1063,26 @@ def main ():
     print(f'Source position: {src}')
     print(f'Destination position: {dest}')
 
-    find_route_random(src, dest)
+    random_routing_sat = sat_object_list[random.randint(0, (orbit_cnt * sats_per_orbit)-1)]
 
-    find_route_dijkstra(src, dest)
+    sat_east = random_routing_sat.get_sat_East()
+    sat_west = random_routing_sat.get_sat_West()
+    sat_north = random_routing_sat.get_sat_North()
+    sat_south = random_routing_sat.get_sat_South()
+
+    random_routing_sat.find_cur_pos_diff(sat_east)
+    random_routing_sat.find_cur_pos_diff(sat_west)
+    random_routing_sat.find_cur_pos_diff(sat_north)
+    random_routing_sat.find_cur_pos_diff(sat_south)
+
+    random_routing_sat.find_cur_pos_diff_spherical(sat_east)
+    random_routing_sat.find_cur_pos_diff_spherical(sat_west)
+    random_routing_sat.find_cur_pos_diff_spherical(sat_north)
+    random_routing_sat.find_cur_pos_diff_spherical(sat_south)
+
+    #find_route_random(src, dest)
+
+    #find_route_dijkstra(src, dest)
 
     exit()
 
