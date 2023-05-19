@@ -4,7 +4,7 @@ from sgp4.api import Satrec, WGS72
 #import pandas as pd
 import random
 from datetime import date, timedelta
-from math import pi, floor
+from math import pi, floor, sqrt
 import time
 
 # for plotting orbits
@@ -61,6 +61,10 @@ class routing_sat:
     def get_sat_lon_degrees(self):
         _, lon = wgs84.latlon_of(self.sat.at(cur_time))
         return lon.degrees
+    
+    def get_sat_lat_lon_degrees(self):
+        lat, lon = wgs84.latlon_of(self.sat.at(cur_time))
+        return lat.degrees, lon.degrees
     
     def is_East_of(self, dest):
         sat_geoc = self.sat.at(cur_time)
@@ -299,6 +303,8 @@ def increment_time():
     python_t = cur_time.utc_datetime()
     new_python_time = python_t + timedelta(seconds = time_interval)
     cur_time = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
+    new_python_time = python_t + timedelta(seconds = time_interval+1)
+    cur_time_next = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
 
 def draw_static_plot(satnum_list, title='figure'): # Given a list of satnums, generate a static plot
 
@@ -633,6 +639,15 @@ def plot_NSEW():
         test_list.append(random_sat_South.satnum) # Southern satellite is third
         
         draw_static_plot(test_list, 'North-South satellites') 
+
+def get_vector_rad_angle(vec1, vec2):
+    cross_prod = np.cross(vec1, vec2)
+    cross_pod_len = sqrt((cross_prod[0]*cross_prod[0])+(cross_prod[1]*cross_prod[1])+(cross_prod[2]*cross_prod[2]))
+    cross_prod_unit_vec = [cross_prod[0]/cross_pod_len, cross_prod[1]/cross_pod_len, cross_prod[2]/cross_pod_len]
+    dot_prod = np.dot(vec1, vec2)
+    angle = np.arctan2(cross_prod_unit_vec, dot_prod)
+    return angle
+
 
 
 #  Something that goes Up to the North, then over two orbits, then Down to the South
@@ -1036,7 +1051,8 @@ def main ():
     print('\n')
     """
     global cur_time
-    cur_time = time_scale.utc(2023, 5, 9, 0, 0)
+    cur_time = time_scale.utc(2023, 5, 9, 0, 0, 0)
+    cur_time_next = time_scale.utc(2023, 5, 9, 0, 0, 1)
     print(f"Set current time to: {cur_time.utc_jpl()}")
        
 
@@ -1069,6 +1085,25 @@ def main ():
     sat_west = random_routing_sat.get_sat_West()
     sat_north = random_routing_sat.get_sat_North()
     sat_south = random_routing_sat.get_sat_South()
+
+    print(f"Random sat position vector: {random_routing_sat.sat.at(cur_time).position.km}")
+    sat_east_angle = get_vector_rad_angle(random_routing_sat.sat.at(cur_time).position.km, sat_east.sat.at(cur_time).position.km)
+    print(f"Angle from selected sat and sat_is: {sat_east_angle} (in radians)")
+
+    random_sat_lat, random_sat_lon = random_routing_sat.get_sat_lat_lon_degrees()
+    random_sat_lat_next, random_sat_lon_next = wgs84.latlon_of(random_routing_sat.sat.at(cur_time_next))
+    sat_west_lat, sat_west_lon = sat_west.get_sat_lat_lon_degrees()
+    
+    #lat_dif = random_sat_lat_next - random_sat_lat
+    #lon_dif = random_sat_lon_next - random_sat_lon
+
+    random_sat_lat_rad = math.radians(random_sat_lat)
+    random_sat_lon_rad = math.radians(random_sat_lon)
+    random_sat_lat_next = math.radians(random_sat_lat_next)
+
+
+    if (random_sat_lon > 0) and (sat_west_lon < 0):
+        pass
 
     random_routing_sat.find_cur_pos_diff(sat_east)
     random_routing_sat.find_cur_pos_diff(sat_west)
