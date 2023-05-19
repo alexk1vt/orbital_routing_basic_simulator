@@ -27,7 +27,7 @@ num_sats = 0
 eph = None
 
 # Time variables
-time_scale = 0
+time_scale = load.timescale()
 time_interval = 1 # interval between time increments, measured in seconds
 secs_per_km = 0.0000033
 
@@ -36,7 +36,7 @@ sats_per_orbit = 22
 orbit_cnt = 72
 
 # Adjacent satellite characterisitcs
-lat_range = 1 # satellites to E/W can fall within +- this value
+g_lat_range = 1 # satellites to E/W can fall within +- this value
 
 # Ground Station characteristics
 req_elev = 60
@@ -88,7 +88,7 @@ class routing_sat:
             return True
         return False
     
-    def get_sat_East(self, _lat_range = lat_range):
+    def get_sat_East(self, lat_range = g_lat_range):
         #range of satnums for target orbit
         min_satnum = self.orbit_number_East * sats_per_orbit
         max_satnum = min_satnum + sats_per_orbit
@@ -97,7 +97,7 @@ class routing_sat:
         routing_sat_list = []
         for routing_sat_obj in sat_object_list[min_satnum:max_satnum]:
             sat_lat = routing_sat_obj.get_sat_lat_degrees()
-            if ((cur_lat - _lat_range) < sat_lat) and (sat_lat < (cur_lat + _lat_range)):
+            if ((cur_lat - lat_range) < sat_lat) and (sat_lat < (cur_lat + lat_range)):
                 routing_sat_list.append(routing_sat_obj)
         if len(routing_sat_list) == 0:
             print('No East adjacent satellite found')
@@ -112,7 +112,7 @@ class routing_sat:
             
         return closest_sat_East
 
-    def get_sat_West(self, _lat_range = lat_range):
+    def get_sat_West(self, lat_range = g_lat_range):
         #range of satnums for target orbit
         min_satnum = self.orbit_number_West * sats_per_orbit
         max_satnum = min_satnum + sats_per_orbit
@@ -121,7 +121,7 @@ class routing_sat:
         routing_sat_list = []
         for routing_sat_obj in sat_object_list[min_satnum:max_satnum]:
             sat_lat = routing_sat_obj.get_sat_lat_degrees()
-            if ((cur_lat - _lat_range) < sat_lat) and (sat_lat < (cur_lat + _lat_range)):
+            if ((cur_lat - lat_range) < sat_lat) and (sat_lat < (cur_lat + lat_range)):
                 routing_sat_list.append(routing_sat_obj)
         if len(routing_sat_list) == 0:
             print('No West adjacent satellite found')
@@ -159,6 +159,20 @@ class routing_sat:
         if target_lat.degrees < self_lat.degrees:
 
             return None
+        return sat_object_list[target_satnum]
+
+    def get_fore_sat(self):
+        target_satnum = self.satnum + 1
+        target_orbit_number = floor(target_satnum / sats_per_orbit)
+        if target_orbit_number != self.orbit_number:
+            target_satnum = (self.orbit_number * sats_per_orbit) + (target_satnum % sats_per_orbit)
+        return sat_object_list[target_satnum]
+    
+    def get_aft_sat(self):
+        target_satnum = self.satnum - 1
+        target_orbit_number = floor(target_satnum / sats_per_orbit)
+        if target_orbit_number != self.orbit_number:
+            target_satnum = (self.orbit_number * sats_per_orbit) + (target_satnum % sats_per_orbit)
         return sat_object_list[target_satnum]
 
     def get_sat_South(self):
@@ -301,11 +315,16 @@ def get_sat_distance(sat1_geoc, sat2_geoc): # returns distance between satellite
     return (sat1_geoc - sat2_geoc).distance().km
 
 def increment_time():
+    global cur_time, cur_time_next, time_scale
     python_t = cur_time.utc_datetime()
     new_python_time = python_t + timedelta(seconds = time_interval)
     cur_time = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
     new_python_time = python_t + timedelta(seconds = time_interval+1)
     cur_time_next = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
+
+def set_time_interval(interval_seconds): # sets the time interval (in seconds)
+    global time_interval
+    time_interval = interval_seconds
 
 def draw_static_plot(satnum_list, title='figure'): # Given a list of satnums, generate a static plot
 
@@ -664,6 +683,48 @@ def get_bearing_degrees(sat1_geoc, sat2_geoc):
     bearing = (bearing + 360) % 360
     return bearing
 
+def get_rel_bearing_by_satnum_degrees(sat1_satnum, sat2_satnum, sat1_heading=None):
+    routing_sat1 = sat_object_list[sat1_satnum]
+    routing_sat2 = sat_object_list[sat2_satnum]
+
+    sat1_lat, sat1_lon = wgs84.latlon_of(routing_sat1.sat.at(cur_time))
+    sat2_lat, sat2_lon = wgs84.latlon_of(routing_sat2.sat.at(cur_time))
+    sat1_lat_rad = math.radians(sat1_lat.degrees)
+    sat1_lon_rad = math.radians(sat1_lon.degrees)
+    sat2_lat_rad = math.radians(sat2_lat.degrees)
+    sat2_lon_rad = math.radians(sat2_lon.degrees)
+    bearing = math.atan2(
+        math.sin(sat2_lon_rad - sat1_lon_rad) * math.cos(sat2_lat_rad),
+        math.cos(sat1_lat_rad) * math.sin(sat2_lat_rad) - math.sin(sat1_lat_rad) * math.cos(sat2_lat_rad) * math.cos(sat2_lon_rad - sat1_lon_rad)
+    )
+    bearing = math.degrees(bearing)
+    bearing = (bearing + 360) % 360
+
+    if sat1_heading is None:
+        sat1_heading = get_heading_by_satnum_degrees(sat1_satnum)
+
+    rel_bearing = bearing - sat1_heading
+    rel_bearing = (rel_bearing + 360) % 360
+
+    return rel_bearing
+
+def get_heading_by_satnum_degrees(satnum):
+    global cur_time_next
+    routing_sat = sat_object_list[satnum]
+
+    sat1_lat, sat1_lon = wgs84.latlon_of(routing_sat.sat.at(cur_time))
+    sat2_lat, sat2_lon = wgs84.latlon_of(routing_sat.sat.at(cur_time_next))
+    sat1_lat_rad = math.radians(sat1_lat.degrees)
+    sat1_lon_rad = math.radians(sat1_lon.degrees)
+    sat2_lat_rad = math.radians(sat2_lat.degrees)
+    sat2_lon_rad = math.radians(sat2_lon.degrees)
+    bearing = math.atan2(
+        math.sin(sat2_lon_rad - sat1_lon_rad) * math.cos(sat2_lat_rad),
+        math.cos(sat1_lat_rad) * math.sin(sat2_lat_rad) - math.sin(sat1_lat_rad) * math.cos(sat2_lat_rad) * math.cos(sat2_lon_rad - sat1_lon_rad)
+    )
+    bearing = math.degrees(bearing)
+    bearing = (bearing + 360) % 360
+    return bearing
 
 #  Something that goes Up to the North, then over two orbits, then Down to the South
 def test_North_South_path():
@@ -933,7 +994,7 @@ def find_route_dijkstra(src, dest):
     
         
 def main ():
-    time_scale = load.timescale()
+    #time_scale = load.timescale()
     #tle_path = '/home/alexk1/Documents/satellite_data/starlink_9MAY23.txt'
     #tle_path = '/home/alexk1/Documents/satellite_data/STARLINK-1071.txt'
     tle_path = './STARLINK-1071.txt'
@@ -1066,6 +1127,7 @@ def main ():
     print('\n')
     """
     global cur_time
+    global cur_time_next
     cur_time = time_scale.utc(2023, 5, 9, 0, 0, 0)
     cur_time_next = time_scale.utc(2023, 5, 9, 0, 0, 1)
     print(f"Set current time to: {cur_time.utc_jpl()}")
@@ -1094,17 +1156,55 @@ def main ():
     print(f'Source position: {src}')
     print(f'Destination position: {dest}')
 
-    random_routing_sat = sat_object_list[random.randint(0, (orbit_cnt * sats_per_orbit)-1)]
+    #random_num = random.randint(0, (orbit_cnt * sats_per_orbit)-1)
+    random_num = 503
+    random_routing_sat = sat_object_list[random_num]
 
-    sat_east = random_routing_sat.get_sat_East()
-    sat_west = random_routing_sat.get_sat_West()
-    sat_north = random_routing_sat.get_sat_North()
-    sat_south = random_routing_sat.get_sat_South()
+    routing_sat_east = random_routing_sat.get_sat_East()
+    routing_sat_west = random_routing_sat.get_sat_West()
+    routing_sat_north = random_routing_sat.get_sat_North()
+    routing_sat_south = random_routing_sat.get_sat_South()
 
-    print(f"Random sat position vector: {random_routing_sat.sat.at(cur_time).position.km}")
-    sat_east_angle = get_vector_rad_angle(random_routing_sat.sat.at(cur_time).position.km, sat_east.sat.at(cur_time).position.km)
-    print(f"Angle from selected sat and sat_is: {sat_east_angle} (in radians)")
+    routing_sat_fore = random_routing_sat.get_fore_sat()
+    routing_sat_aft = random_routing_sat.get_aft_sat()
 
+    #print(f"Random sat position vector: {random_routing_sat.sat.at(cur_time).position.km}")
+    #sat_east_angle = get_vector_rad_angle(random_routing_sat.sat.at(cur_time).position.km, sat_east.sat.at(cur_time).position.km)
+    #print(f"Angle from selected sat and sat_is: {sat_east_angle} (in radians)")
+
+    random_sat_satnum = random_routing_sat.sat.model.satnum
+    sat_north_satnum = routing_sat_north.sat.model.satnum
+    sat_south_satnum = routing_sat_south.sat.model.satnum
+    sat_east_satnum = routing_sat_east.sat.model.satnum
+    sat_west_satnum = routing_sat_west.sat.model.satnum
+
+    fore_sat_satnum = routing_sat_fore.sat.model.satnum
+    aft_sat_satnum = routing_sat_aft.sat.model.satnum
+
+    print(f"East_sat orbit number: {routing_sat_east.orbit_number}; Random sat's stated orbit number east: {random_routing_sat.orbit_number_East}")
+    print(f"West_sat orbit number: {routing_sat_west.orbit_number}; Random sat's stated orbit number west: {random_routing_sat.orbit_number_West}")
+
+    heading = get_heading_by_satnum_degrees(random_routing_sat.sat.model.satnum)
+    print(f"Selected sat: {random_routing_sat.sat.model.satnum} has heading of {heading}deg")
+    interval = 60 # in seconds
+    set_time_interval(interval) 
+    loop_cnt = 90
+    print(f"Using interval of {interval/60:.2f} mins")
+    #print(f"Bearings for satellites North ({sat_north_satnum}), South ({sat_south_satnum}), East ({sat_east_satnum}), West ({sat_west_satnum}) for {loop_cnt} loops")
+    print(f"Bearings for satellites Fore ({fore_sat_satnum}), Aft ({aft_sat_satnum}), East ({sat_east_satnum}), West ({sat_west_satnum}) for {loop_cnt} loops")
+    for i in range(loop_cnt): 
+        heading = get_heading_by_satnum_degrees(random_routing_sat.sat.model.satnum)
+        #sat_north_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, sat_north_satnum, heading)
+        #sat_south_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, sat_south_satnum, heading)
+        fore_sat_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, fore_sat_satnum, heading)
+        aft_sat_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, aft_sat_satnum, heading)
+        sat_east_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, sat_east_satnum, heading)
+        sat_west_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, sat_west_satnum, heading)
+        lat, lon = random_routing_sat.get_sat_lat_lon_degrees()
+        #print(cur_time.utc_jpl())
+        print(f"Sat pos: Lat:{lat:.2f}\tLon:{lon:.2f}\tHeading: {heading:.2f} |\tFore: {fore_sat_bearing:.2f}\tAft: {aft_sat_bearing:.2f}\tEast: {sat_east_bearing:.2f}\tWest: {sat_west_bearing:.2f}")
+        increment_time()
+    exit()
     random_sat_geoc = random_routing_sat.sat.at(cur_time)
     random_sat_geoc_next = random_routing_sat.sat.at(cur_time_next)
     random_sat_bearing = get_bearing_degrees(random_sat_geoc, random_sat_geoc_next)
@@ -1139,45 +1239,8 @@ def main ():
     print(f"Sat_east rel bearing: {sat_east_bearing_rel}deg")
     print(f"Sat_west rel bearing: {sat_west_bearing_rel}deg")
 
-    exit()
-    random_sat_lat, random_sat_lon = random_routing_sat.get_sat_lat_lon_degrees()
-    random_sat_lat_next, random_sat_lon_next = wgs84.latlon_of(random_routing_sat.sat.at(cur_time_next))
-    random_sat_lat_next = random_sat_lat_next.degrees
-    random_sat_lon_next = random_sat_lon_next.degrees
-    sat_west_lat, sat_west_lon = sat_west.get_sat_lat_lon_degrees()
 
-    print(f"Random sat lat: {random_sat_lat} lon: {random_sat_lon}")
-    print(f"Random sat next: lat: {random_sat_lat_next}, lon: {random_sat_lon_next}")
-    
-    #lat_dif = random_sat_lat_next - random_sat_lat
-    #lon_dif = random_sat_lon_next - random_sat_lon
 
-    random_sat_lat_rad = math.radians(random_sat_lat)
-    random_sat_lon_rad = math.radians(random_sat_lon)
-    random_sat_lat_next_rad = math.radians(random_sat_lat_next)
-    random_sat_lon_next_rad = math.radians(random_sat_lon_next)
-    bearing = math.atan2(
-        math.sin(random_sat_lon_next_rad - random_sat_lon_rad) * math.cos(random_sat_lat_next_rad),
-        math.cos(random_sat_lat_rad) * math.sin(random_sat_lat_next_rad) - math.sin(random_sat_lat_rad) * math.cos(random_sat_lat_next_rad) * math.cos(random_sat_lon_next_rad - random_sat_lon_rad)
-    )
-    bearing = math.degrees(bearing)
-    bearing = (bearing + 360) % 360
-    print(f"Random sat bearing is: {bearing}deg")
-
-    sat2_lat_rad = math.radians(sat_west_lat)
-    sat2_lon_rad = math.radians(sat_west_lon)
-
-    sat2_bearing = math.atan2(
-        math.sin(sat2_lon_rad - random_sat_lon_rad) * math.cos(sat2_lat_rad),
-        math.cos(random_sat_lat_rad) * math.sin(sat2_lat_rad) - math.sin(random_sat_lat_rad) * math.cos(sat2_lat_rad) * math.cos(sat2_lon_rad - random_sat_lon_rad)
-    )
-    sat2_bearing = math.degrees(sat2_bearing)
-    sat2_bearing = (bearing + 360) % 360
-    print(f"Sat2 bearing from Sat1 is {sat2_bearing}degrees")
-
-    relative_bearing = sat2_bearing - bearing
-    relative_bearing = (relative_bearing + 360) % 360
-    print(f"Sat2 is {relative_bearing}degrees from Sat1 heading")
 
 """
     random_routing_sat.find_cur_pos_diff(sat_east)
