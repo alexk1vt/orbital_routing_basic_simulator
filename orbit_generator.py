@@ -5,6 +5,7 @@ from sgp4.api import Satrec, WGS72
 import random
 from datetime import date, timedelta
 from math import pi, floor, sqrt
+import math
 import time
 
 # for plotting orbits
@@ -648,6 +649,20 @@ def get_vector_rad_angle(vec1, vec2):
     angle = np.arctan2(cross_prod_unit_vec, dot_prod)
     return angle
 
+def get_bearing_degrees(sat1_geoc, sat2_geoc):
+    sat1_lat, sat1_lon = wgs84.latlon_of(sat1_geoc)
+    sat2_lat, sat2_lon = wgs84.latlon_of(sat2_geoc)
+    sat1_lat_rad = math.radians(sat1_lat.degrees)
+    sat1_lon_rad = math.radians(sat1_lon.degrees)
+    sat2_lat_rad = math.radians(sat2_lat.degrees)
+    sat2_lon_rad = math.radians(sat2_lon.degrees)
+    bearing = math.atan2(
+        math.sin(sat2_lon_rad - sat1_lon_rad) * math.cos(sat2_lat_rad),
+        math.cos(sat1_lat_rad) * math.sin(sat2_lat_rad) - math.sin(sat1_lat_rad) * math.cos(sat2_lat_rad) * math.cos(sat2_lon_rad - sat1_lon_rad)
+    )
+    bearing = math.degrees(bearing)
+    bearing = (bearing + 360) % 360
+    return bearing
 
 
 #  Something that goes Up to the North, then over two orbits, then Down to the South
@@ -1090,21 +1105,81 @@ def main ():
     sat_east_angle = get_vector_rad_angle(random_routing_sat.sat.at(cur_time).position.km, sat_east.sat.at(cur_time).position.km)
     print(f"Angle from selected sat and sat_is: {sat_east_angle} (in radians)")
 
+    random_sat_geoc = random_routing_sat.sat.at(cur_time)
+    random_sat_geoc_next = random_routing_sat.sat.at(cur_time_next)
+    random_sat_bearing = get_bearing_degrees(random_sat_geoc, random_sat_geoc_next)
+    print(f"Random Sat bearing is: {random_sat_bearing}deg")
+
+    sat_west_geoc = sat_west.sat.at(cur_time)
+    sat2_bearing_abs = get_bearing_degrees(random_sat_geoc, sat_west_geoc)
+    print(f"Sat_west abs bearing: {sat2_bearing_abs}deg")
+
+    sat2_bearing_rel = sat2_bearing_abs - random_sat_bearing
+    print(f"Sat_west relative bearing: {sat2_bearing_rel}deg")
+    sat_west_bearing_rel = (sat2_bearing_rel + 360) % 360
+    print(f"Adjusted Sat_west relative bearing: {sat2_bearing_rel}deg")
+
+    sat_north_geoc = sat_north.sat.at(cur_time)
+    sat_south_geoc = sat_south.sat.at(cur_time)
+    sat_east_geoc = sat_east.sat.at(cur_time)
+
+    sat_north_bearing_abs = get_bearing_degrees(random_sat_geoc, sat_north_geoc)
+    sat_south_bearing_abs = get_bearing_degrees(random_sat_geoc, sat_south_geoc)
+    sat_east_bearing_abs = get_bearing_degrees(random_sat_geoc, sat_east_geoc)
+
+    sat_north_bearing_rel = sat_north_bearing_abs - random_sat_bearing
+    sat_north_bearing_rel = (sat_north_bearing_rel + 360) % 360
+    sat_south_bearing_rel = sat_south_bearing_abs - random_sat_bearing
+    sat_south_bearing_rel = (sat_south_bearing_rel + 360) % 360
+    sat_east_bearing_rel = sat_east_bearing_abs - random_sat_bearing
+    sat_east_bearing_rel = (sat_east_bearing_rel + 360) % 360
+
+    print(f"Sat_north rel bearing: {sat_north_bearing_rel}deg")
+    print(f"Sat_south rel bearing: {sat_south_bearing_rel}deg")
+    print(f"Sat_east rel bearing: {sat_east_bearing_rel}deg")
+    print(f"Sat_west rel bearing: {sat_west_bearing_rel}deg")
+
+    exit()
     random_sat_lat, random_sat_lon = random_routing_sat.get_sat_lat_lon_degrees()
     random_sat_lat_next, random_sat_lon_next = wgs84.latlon_of(random_routing_sat.sat.at(cur_time_next))
+    random_sat_lat_next = random_sat_lat_next.degrees
+    random_sat_lon_next = random_sat_lon_next.degrees
     sat_west_lat, sat_west_lon = sat_west.get_sat_lat_lon_degrees()
+
+    print(f"Random sat lat: {random_sat_lat} lon: {random_sat_lon}")
+    print(f"Random sat next: lat: {random_sat_lat_next}, lon: {random_sat_lon_next}")
     
     #lat_dif = random_sat_lat_next - random_sat_lat
     #lon_dif = random_sat_lon_next - random_sat_lon
 
     random_sat_lat_rad = math.radians(random_sat_lat)
     random_sat_lon_rad = math.radians(random_sat_lon)
-    random_sat_lat_next = math.radians(random_sat_lat_next)
+    random_sat_lat_next_rad = math.radians(random_sat_lat_next)
+    random_sat_lon_next_rad = math.radians(random_sat_lon_next)
+    bearing = math.atan2(
+        math.sin(random_sat_lon_next_rad - random_sat_lon_rad) * math.cos(random_sat_lat_next_rad),
+        math.cos(random_sat_lat_rad) * math.sin(random_sat_lat_next_rad) - math.sin(random_sat_lat_rad) * math.cos(random_sat_lat_next_rad) * math.cos(random_sat_lon_next_rad - random_sat_lon_rad)
+    )
+    bearing = math.degrees(bearing)
+    bearing = (bearing + 360) % 360
+    print(f"Random sat bearing is: {bearing}deg")
 
+    sat2_lat_rad = math.radians(sat_west_lat)
+    sat2_lon_rad = math.radians(sat_west_lon)
 
-    if (random_sat_lon > 0) and (sat_west_lon < 0):
-        pass
+    sat2_bearing = math.atan2(
+        math.sin(sat2_lon_rad - random_sat_lon_rad) * math.cos(sat2_lat_rad),
+        math.cos(random_sat_lat_rad) * math.sin(sat2_lat_rad) - math.sin(random_sat_lat_rad) * math.cos(sat2_lat_rad) * math.cos(sat2_lon_rad - random_sat_lon_rad)
+    )
+    sat2_bearing = math.degrees(sat2_bearing)
+    sat2_bearing = (bearing + 360) % 360
+    print(f"Sat2 bearing from Sat1 is {sat2_bearing}degrees")
 
+    relative_bearing = sat2_bearing - bearing
+    relative_bearing = (relative_bearing + 360) % 360
+    print(f"Sat2 is {relative_bearing}degrees from Sat1 heading")
+
+"""
     random_routing_sat.find_cur_pos_diff(sat_east)
     random_routing_sat.find_cur_pos_diff(sat_west)
     random_routing_sat.find_cur_pos_diff(sat_north)
@@ -1114,12 +1189,12 @@ def main ():
     random_routing_sat.find_cur_pos_diff_spherical(sat_west)
     random_routing_sat.find_cur_pos_diff_spherical(sat_north)
     random_routing_sat.find_cur_pos_diff_spherical(sat_south)
-
+"""
     #find_route_random(src, dest)
 
     #find_route_dijkstra(src, dest)
 
-    exit()
+    #exit()
 
 if __name__ == "__main__":
     main()
