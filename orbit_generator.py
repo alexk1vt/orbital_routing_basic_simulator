@@ -37,20 +37,75 @@ orbit_cnt = 72
 
 # Adjacent satellite characterisitcs
 g_lat_range = 1 # satellites to E/W can fall within +- this value
+lateral_antenna_range = 30 #30
 
 # Ground Station characteristics
 req_elev = 60
 
-class routing_sat:
-    def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _orbit_number_East, _orbit_number_West, _sat_index_North, _sat_index_South):
+class RoutingSat:
+    def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _succeeding_orbit_number, _preceeding_orbit_number, _fore_sat_index, _aft_sat_index):
         self.sat = _sat
         self.satnum = _satnum
         self.orbit_number = _orbit_number
         self.sat_index = _sat_index
-        self.orbit_number_East = _orbit_number_East
-        self.orbit_number_West = _orbit_number_West
-        self.sat_index_North = _sat_index_North
-        self.sat_index_South = _sat_index_South
+        self.succeeding_orbit_number = _succeeding_orbit_number
+        self.preceeding_orbit_number = _preceeding_orbit_number
+        self.fore_sat_satnum = _fore_sat_index
+        self.aft_sat_satnum = _aft_sat_index
+        self.port_sat_satnum = None
+        self.starboard_sat_satnum = None
+        self.xmt_qu = []  # these are the send/receive queues - their contents depend on the routing algorithm being used
+        self.rcv_qu = []
+
+    # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_gs] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
+    def directed_routing_rcv_cycle(self):
+        self.port_sat_satnum = None
+        self.starboard_sat_satnum = None
+        preceeding_orbit_satnum, preceeding_orbit_int = self.check_preceeding_orbit_sat_available()
+        succeeding_orbit_satnum, succeeding_orbit_int = self.check_succeeding_orbit_sat_available()
+        if not preceeding_orbit_satnum is None:
+            if preceeding_orbit_int == 'port':
+                self.port_sat_index = preceeding_orbit_satnum
+            else:
+                self.starboard_sat_index = preceeding_orbit_satnum
+        if not succeeding_orbit_satnum is None:
+            if succeeding_orbit_int == 'port':
+                self.port_sat_index = succeeding_orbit_satnum
+            else:
+                self.starboard_sat_index = succeeding_orbit_satnum
+
+        for packet in self.rcv_qu:
+            if self.sat.model.satnum  == packet[0]:
+                if not self.is_overhead_of(packet[4]):
+                    print(f"Reached final satnum, but not overhead destination terminal!")
+                    self.rcv_qu.remove(packet)
+                    continue
+                topo_position = (self.sat - packet[4]).at(cur_time)
+                alt, _, dist = topo_position.altaz()
+                if alt.degrees < 30:
+                    print(f"Satellite {self.sat.model.satnum} is not 30deg overhead destination terminal")
+                    self.rcv_qu.remove(packet)
+                    continue
+                packet[3] += dist
+                print(f"{self.sat.model.satnum}: Packet reached destination in {len(packet[2])} hops.  Total distance: {packet[3]}km")
+            else:
+                target_satnum = packet[1].pop() #the head of the next_hop_list
+                if (self.fore_sat_satnum == target_satnum) or (self.aft_sat_satnum == target_satnum) or (self.port_sat_satnum == target_satnum) or (self.starboard_sat_satnum == target_satnum):
+                    packet[2].append(self.sat.model.satnum)
+                    target_distance, _ = get_sat_distance_and_rate_by_satnum(target_satnum)
+                    packet[3] += target_distance
+                    self.xmt_qu.insert(1, packet) # add packet to transmit queue for sending during transmit cycle
+                    self.rcv_qu.remove(packet)
+                    # add this packet to this sattelite's xmt queue and mark additional distance, etc...
+                else:
+                    print(f"({self.sat.model.satnum})No connection to satnum {target_satnum}")
+                    self.rcv_qu.remove(packet)
+    
+    def directed_routing_xmt_cycle(self):
+        for packet in self.xmt_qu:
+            target_satnum = packet[1][0] #read top of next hop list
+            add_to_rcv_qu_by_satnum(target_satnum, packet)
+            self.xmt_qu.remove(packet)
 
     def get_curr_geocentric(self):
         return self.sat.at(cur_time)
@@ -88,9 +143,104 @@ class routing_sat:
             return True
         return False
     
+    def check_preceeding_orbit_sat_available(self): # returns satnum if sat is within range (None otherwise).  If satnum is other than None, interface will indicate which ('port'/'starboard')
+        heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
+        port_bearing = 270
+        starboard_bearing = 90
+        port_range_min = port_bearing-int(lateral_antenna_range/2)
+        port_range_max = port_bearing+int(lateral_antenna_range/2)
+        starboard_range_min = starboard_bearing-int(lateral_antenna_range/2)
+        starboard_range_max = starboard_bearing+int(lateral_antenna_range/2)
+        min_satnum = self.preceeding_orbit_number * sats_per_orbit
+        max_satnum = min_satnum + sats_per_orbit
+
+        tentative_satnum_list = []
+        for test_satnum in range(min_satnum, max_satnum):
+            test_sat_bearing = get_rel_bearing_by_satnum_degrees(self.sat.model.satnum, test_satnum, heading)
+            distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
+            if distance > 1000:
+                continue  # Don't try to connect to lateral satellites with distances > 1000km - seems like an unreasonable ability 
+            if (port_range_min < test_sat_bearing) and (test_sat_bearing < port_range_max):
+                tentative_satnum_list.append((test_satnum, 'port'))
+            elif (starboard_range_min < test_sat_bearing) and (test_sat_bearing < starboard_range_max):
+                tentative_satnum_list.append((test_satnum, 'starboard'))
+        if len(tentative_satnum_list) == 0:
+            satnum = None
+            interface = None
+        elif len(tentative_satnum_list) == 1:
+            satnum = tentative_satnum_list[0][0]
+            interface = tentative_satnum_list[0][1]
+        else:
+            closest_satnum = None
+            min_distance = float('inf') # Initialize minimum distance to infinity
+            cur_routing_sat = get_routing_sat_obj_by_satnum(self.sat.model.satnum)
+            #print(f"Found {len(tentative_satnum_list)} sats in preceeding orbit")
+            for test_satnum_int in tentative_satnum_list:
+                test_satnum, test_int = test_satnum_int
+                test_routing_sat = get_routing_sat_obj_by_satnum(test_satnum)
+                # Calculate the straight-line distance between the input satellite and each satellite in the list
+                sat_diff = cur_routing_sat.sat.at(cur_time) - test_routing_sat.sat.at(cur_time)
+                # Update the closest satellite and minimum distance if a new minimum is found
+                if sat_diff.distance().km < min_distance:
+                    closest_satnum = test_routing_sat.sat.model.satnum
+                    closest_int = test_int
+                    min_distance = sat_diff.distance().km
+            satnum = closest_satnum
+            interface = closest_int
+        return satnum, interface
+
+    def check_succeeding_orbit_sat_available(self): # returns satnum if sat is within range (None otherwise).  If satnum is other than None, interface will indicate which ('port'/'starboard')
+        heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
+        port_bearing = 270
+        starboard_bearing = 90
+        port_range_min = port_bearing-int(lateral_antenna_range/2)
+        port_range_max = port_bearing+int(lateral_antenna_range/2)
+        starboard_range_min = starboard_bearing-int(lateral_antenna_range/2)
+        starboard_range_max = starboard_bearing+int(lateral_antenna_range/2)
+        min_satnum = self.succeeding_orbit_number * sats_per_orbit
+        max_satnum = min_satnum + sats_per_orbit
+
+        tentative_satnum_list = []
+        for test_satnum in range(min_satnum, max_satnum):
+            test_sat_bearing = get_rel_bearing_by_satnum_degrees(self.sat.model.satnum, test_satnum, heading)
+            distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
+            if distance > 1000:
+                continue  # Don't try to connect to lateral satellites with distances > 1000km - seems like an unreasonable ability
+            if (port_range_min < test_sat_bearing) and (test_sat_bearing < port_range_max):
+                tentative_satnum_list.append((test_satnum, 'port'))
+            elif (starboard_range_min < test_sat_bearing) and (test_sat_bearing < starboard_range_max):
+                tentative_satnum_list.append((test_satnum, 'starboard'))
+        if len(tentative_satnum_list) == 0:
+            satnum = None
+            interface = None
+        elif len(tentative_satnum_list) == 1:
+            satnum = tentative_satnum_list[0][0]
+            interface = tentative_satnum_list[0][1]
+        else:
+            closest_satnum = None
+            min_distance = float('inf') # Initialize minimum distance to infinity
+            cur_routing_sat = get_routing_sat_obj_by_satnum(self.sat.model.satnum)
+            #print(f"Found {len(tentative_satnum_list)} sats in succeeding orbit")
+            for test_satnum_int in tentative_satnum_list:
+                test_satnum, test_int = test_satnum_int
+                test_routing_sat = get_routing_sat_obj_by_satnum(test_satnum)
+                # Calculate the straight-line distance between the input satellite and each satellite in the list
+                sat_diff = cur_routing_sat.sat.at(cur_time) - test_routing_sat.sat.at(cur_time)
+                # Update the closest satellite and minimum distance if a new minimum is found
+                if sat_diff.distance().km < min_distance:
+                    closest_satnum = test_routing_sat.sat.model.satnum
+                    closest_int = test_int
+                    min_distance = sat_diff.distance().km
+            satnum = closest_satnum
+            interface = closest_int
+        return satnum, interface
+
+    def check_succeeding_orbit(self):
+        pass
+
     def get_sat_East(self, lat_range = g_lat_range):
         #range of satnums for target orbit
-        min_satnum = self.orbit_number_East * sats_per_orbit
+        min_satnum = self.succeeding_orbit_number * sats_per_orbit
         max_satnum = min_satnum + sats_per_orbit
         cur_lat = self.get_sat_lat_degrees()
 
@@ -114,7 +264,7 @@ class routing_sat:
 
     def get_sat_West(self, lat_range = g_lat_range):
         #range of satnums for target orbit
-        min_satnum = self.orbit_number_West * sats_per_orbit
+        min_satnum = self.preceeding_orbit_number * sats_per_orbit
         max_satnum = min_satnum + sats_per_orbit
         cur_lat = self.get_sat_lat_degrees()
 
@@ -162,18 +312,20 @@ class routing_sat:
         return sat_object_list[target_satnum]
 
     def get_fore_sat(self):
-        target_satnum = self.satnum + 1
-        target_orbit_number = floor(target_satnum / sats_per_orbit)
-        if target_orbit_number != self.orbit_number:
-            target_satnum = (self.orbit_number * sats_per_orbit) + (target_satnum % sats_per_orbit)
-        return sat_object_list[target_satnum]
+        return sat_object_list[self.fore_sat_satnum]
+        #target_satnum = self.satnum + 1
+        #target_orbit_number = floor(target_satnum / sats_per_orbit)
+        #if target_orbit_number != self.orbit_number:
+        #    target_satnum = (self.orbit_number * sats_per_orbit) + (target_satnum % sats_per_orbit)
+        #return sat_object_list[target_satnum]
     
     def get_aft_sat(self):
-        target_satnum = self.satnum - 1
-        target_orbit_number = floor(target_satnum / sats_per_orbit)
-        if target_orbit_number != self.orbit_number:
-            target_satnum = (self.orbit_number * sats_per_orbit) + (target_satnum % sats_per_orbit)
-        return sat_object_list[target_satnum]
+        return sat_object_list[self.aft_sat_satnum]
+        #target_satnum = self.satnum - 1
+        #target_orbit_number = floor(target_satnum / sats_per_orbit)
+        #if target_orbit_number != self.orbit_number:
+        #    target_satnum = (self.orbit_number * sats_per_orbit) + (target_satnum % sats_per_orbit)
+        #return sat_object_list[target_satnum]
 
     def get_sat_South(self):
         first_target_satnum = self.satnum - 1
@@ -223,6 +375,10 @@ class routing_sat:
 # End Routing sat class
 
 ## :: General Functions ::
+def add_to_rcv_qu_by_satnum(target_satnum, packet):
+    target_routing_sat = sat_object_list[target_satnum]
+    target_routing_sat.rcv_qu.insert(0, packet)
+
 def get_routing_sat_obj_by_satnum(satnum):
     if len(sat_object_list) < 1:
         return None
@@ -314,6 +470,15 @@ def sat_is_East_of(sat1_geoc, sat2_geoc): # is sat1 more east than sat2
 def get_sat_distance(sat1_geoc, sat2_geoc): # returns distance between satellites in km
     return (sat1_geoc - sat2_geoc).distance().km
 
+def get_sat_distance_and_rate_by_satnum(sat1_satnum, sat2_satnum): # returns distance (in km), rate (in km/s)
+    sat1_geoc = sat_object_list[sat1_satnum].sat.at(cur_time)
+    sat1_geoc_next = sat_object_list[sat1_satnum].sat.at(cur_time_next)
+    sat2_geoc = sat_object_list [sat2_satnum].sat.at(cur_time)
+    sat2_geoc_next = sat_object_list[sat2_satnum].sat.at(cur_time_next)
+    distance = (sat1_geoc - sat2_geoc).distance().km
+    distance_next = (sat1_geoc_next - sat2_geoc_next).distance().km
+    return distance, (distance_next-distance)
+
 def increment_time():
     global cur_time, cur_time_next, time_scale
     python_t = cur_time.utc_datetime()
@@ -326,7 +491,7 @@ def set_time_interval(interval_seconds): # sets the time interval (in seconds)
     global time_interval
     time_interval = interval_seconds
 
-def draw_static_plot(satnum_list, title='figure'): # Given a list of satnums, generate a static plot
+def draw_static_plot(satnum_list, title='figure', draw_lines = True): # Given a list of satnums, generate a static plot
 
     # ::: STATIC COLORED ORBITS :::
     # Original version based on: https://stackoverflow.com/questions/51891538/create-a-surface-plot-of-xyz-altitude-data-in-python
@@ -360,7 +525,8 @@ def draw_static_plot(satnum_list, title='figure'): # Given a list of satnums, ge
     ax.set_zlim3d(ax_min, ax_max)
 
     ax.scatter(x_array, y_array, z_array, c=color_array)
-    ax.plot(x_array, y_array, z_array, color = 'black')
+    if draw_lines:
+        ax.plot(x_array, y_array, z_array, color = 'black')
     plt.show()
 
 def test_NSEW(orbit_list):
@@ -860,24 +1026,35 @@ def find_route_random(src, dest):
     draw_static_plot(sat_traverse_list, title=f'Random: {len(sat_traverse_list)} satellite hops; distance {link_distance:.2f}km')
 
 def find_route_dijkstra(src, dest):
+    print("Starting Dijkstra routing")
     # Find satellite at least 60 deg above the horizon at source and destination
     # FIX: distances must also include the satnum of which sat put the lowest distance!  Must follow that listing backwards to id path to the source
+    sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(src)):
             topo_position = (r_sat.sat - src).at(cur_time)
             alt, az, dist = topo_position.altaz()    
-            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon in destination')
+            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at source')
             print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
+            sat_found = True
             break # Just go with first satellite
+    if not sat_found:
+        print(f"Unable to find satellite over source!")
+        return -1
     src_routing_sat = r_sat
 
+    sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(dest)):
             topo_position = (r_sat.sat - dest).at(cur_time)
             alt, az, dist = topo_position.altaz()    
-            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon in destination')
+            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at destination')
             print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
+            sat_found = True
             break # Just go with first satellite
+    if not sat_found:
+        print(f"Unable to find satellite over destination!")
+        return -1
     dest_routing_sat = r_sat
 
     visited_sat_dict = {} #(satnum, (distance, satnum_who_assigned_distance))
@@ -893,38 +1070,41 @@ def find_route_dijkstra(src, dest):
     route_found = False
 
     start = time.process_time()
+    loop_cnt = 0
+    print("Starting Dijsktra Loop")
     while True:
-        #North neighbor (what if there is no North neighbor?)
-        neigh_North = cur_sat.get_sat_North()
-        if neigh_North is not None: # There is a more Northern Neighbor
-            testing_sat = neigh_North
+        print(f"Loop count: {loop_cnt}", end="\r")
+        
+        neigh_fore = cur_sat.get_fore_sat()
+        if neigh_fore is not None:
+            testing_sat = neigh_fore
             if testing_sat.sat.model.satnum in unvisted_sat_dict:
                 testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
                 tentative_dist = cur_sat_dist + testing_sat_dist
                 if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
                     unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
                 
-        neigh_South = cur_sat.get_sat_South()
-        if neigh_South is not None: # There is a more Southern Neighbor
-            testing_sat = neigh_South
+        neigh_aft = cur_sat.get_aft_sat()
+        if neigh_aft is not None: 
+            testing_sat = neigh_aft
             if testing_sat.sat.model.satnum in unvisted_sat_dict:
                 testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
                 tentative_dist = cur_sat_dist + testing_sat_dist
                 if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
                     unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
 
-        neigh_East = cur_sat.get_sat_East()
-        if neigh_East is not None: # There is a more Eastern Neighbor
-            testing_sat = neigh_East
+        neigh_preceeding_orbit, _ = cur_sat.check_preceeding_orbit_sat_available()
+        if neigh_preceeding_orbit is not None: 
+            testing_sat = get_routing_sat_obj_by_satnum(neigh_preceeding_orbit)
             if testing_sat.sat.model.satnum in unvisted_sat_dict:
                 testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
                 tentative_dist = cur_sat_dist + testing_sat_dist
                 if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
                     unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
 
-        neigh_West = cur_sat.get_sat_West()
-        if neigh_West is not None: # There is a more Western Neighbor
-            testing_sat = neigh_West
+        neigh_succeeding_orbit, _ = cur_sat.check_succeeding_orbit_sat_available()
+        if neigh_succeeding_orbit is not None: 
+            testing_sat = get_routing_sat_obj_by_satnum(neigh_succeeding_orbit)
             if testing_sat.sat.model.satnum in unvisted_sat_dict:
                 testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
                 tentative_dist = cur_sat_dist + testing_sat_dist
@@ -966,6 +1146,7 @@ def find_route_dijkstra(src, dest):
         #    if routing_sat_obj.sat.model.satnum == next_hop:
         #        cur_sat = routing_sat_obj
         #        break
+        loop_cnt += 1
     # Done with loop; check if a route was found
     if not route_found:
         print(f"Unable to find route using dijkstra's algorithm")
@@ -987,12 +1168,27 @@ def find_route_dijkstra(src, dest):
 
     compute_time = time.process_time() - start
     print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
-
-    #for key in visited_sat_dict.keys():
-    #    traverse_list.append(key)
-    draw_static_plot(traverse_list, title=f'Dijkstra: {len(traverse_list)} hops, {link_distance:.2f}km distance')
+    print(f"Transit list:\n{traverse_list}")
+    #draw_static_plot(traverse_list, title=f'Dijkstra: {len(traverse_list)} hops, {link_distance:.2f}km distance')
+    traverse_list.reverse()
+    packet = [traverse_list[-1], traverse_list, [], 0, dest]
+    send_directed_routing_packet_from_source(traverse_list[0], src, packet)
     
-        
+# ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
+def send_directed_routing_packet_from_source(starting_satnum, starting_terminal, packet):  # must have next_hop_list pre_built
+    starting_sat = get_routing_sat_obj_by_satnum(starting_satnum)
+
+    topo_position = (starting_sat.sat - starting_terminal).at(cur_time)
+    alt, az, dist = topo_position.altaz()
+    if not starting_sat.is_overhead_of(starting_terminal):
+        print(f"Satellite {starting_satnum} is not overhead starting terminal {starting_terminal}")
+        return
+    if alt.degrees < 30:
+        print(f"Satellite {starting_satnum} is not 30deg over head starting terminal {starting_terminal}")
+        return
+    packet[3] += dist.km
+    add_to_rcv_qu_by_satnum(starting_satnum, packet)
+    
 def main ():
     #time_scale = load.timescale()
     #tle_path = '/home/alexk1/Documents/satellite_data/starlink_9MAY23.txt'
@@ -1101,9 +1297,11 @@ def main ():
                 Corr_Ecc,                                               # ecco: eccentricity
                 Rad_Arg_Perig,                                          # argpo: argument of perigee (radians)
                 Rad_Inclination,                                        # inclo: inclination (radians)
-                (Rad_Starting_mean_anomoly + (sat_index * MaM))%(2*pi), # mo: mean anomaly (radians) - will need to modify this per satellite
+                #(Rad_Starting_mean_anomoly + (sat_index * MaM))%(2*pi), # mo: mean anomaly (radians) - will need to modify this per satellite ** Need to offset this by appropriate phase!!!
+                #((Rad_Starting_mean_anomoly + ((orbit_index%2) * (MaM/2))) + (sat_index * MaM)) % (2*pi),
+                ((Rad_Starting_mean_anomoly - (orbit_index*MaM*.7)) + ((sat_index % sats_per_orbit) * (MaM))) % (2 * pi), # unsure why this factor got the satellites to line up, but whatever
                 Rad_Mean_motion,                                        # no_kozai: mean motion (radians/minute)
-                (Rad_Starting_RaaN + (orbit_index * RaaNM))%(2*pi)      # nodeo: R.A. of ascending node (radians)
+                (Rad_Starting_RaaN + (orbit_index * RaaNM))%(2*pi)      # nodeo: R.A. of ascending node (radians) (greater the value, the more East?)
             )
             fake_sat.classification = source_sat.model.classification
             fake_sat.elnum = source_sat.model.elnum
@@ -1111,15 +1309,15 @@ def main ():
             sat = EarthSatellite.from_satrec(fake_sat, time_scale)
             orbit.append(sat)
 
-            new_sat = routing_sat(sat, satnum, orbit_index, sat_index, (orbit_index + 1) % orbit_cnt, (orbit_index - 1) % orbit_cnt, (sat_index + 1) % sats_per_orbit, (sat_index - 1) % sats_per_orbit)
+            new_sat = RoutingSat(sat, satnum, orbit_index, sat_index, (orbit_index + 2) % orbit_cnt, (orbit_index - 2) % orbit_cnt, ((sat_index + 1) % sats_per_orbit) + (orbit_index*sats_per_orbit), ((sat_index - 1) % sats_per_orbit) + (orbit_index*sats_per_orbit))
             sat_object_list.append(new_sat)
             satnum += 1
         
         orbit_list.append(orbit)
 
+    global num_sats
     num_sats = orbit_cnt * sats_per_orbit
-    print(f'Orbit list has {len(orbit_list)} orbits')
-
+    
     """
     print(f'\n~~~~~~~~~~ Comparing fake_sat 0 against source satellite ~~~~~~~~~~')
     print(f'   fake_sat 0                           {source_sat.name}')
@@ -1131,7 +1329,27 @@ def main ():
     cur_time = time_scale.utc(2023, 5, 9, 0, 0, 0)
     cur_time_next = time_scale.utc(2023, 5, 9, 0, 0, 1)
     print(f"Set current time to: {cur_time.utc_jpl()}")
-       
+    
+    """
+    # :: Quick plot of three successive orbits to get a feel for layout ::
+    print(f'Orbit list has {len(orbit_list)} orbits')
+    target_orbit_num = 1
+    num_orbits_to_plot = 5
+    min_satnum = target_orbit_num * sats_per_orbit
+    max_satnum = min_satnum + (sats_per_orbit * num_orbits_to_plot)
+    satnum_plot_list = [*range(min_satnum, max_satnum)]
+    draw_static_plot(satnum_plot_list, f"{num_orbits_to_plot} orbits starting with Orbit {target_orbit_num}")
+
+    set_time_interval(600)
+    increment_time()
+    draw_static_plot(satnum_plot_list, f"{num_orbits_to_plot} orbits starting with Orbit {target_orbit_num}")
+    increment_time()
+    draw_static_plot(satnum_plot_list, f"{num_orbits_to_plot} orbits starting with Orbit {target_orbit_num}")
+    increment_time()
+    draw_static_plot(satnum_plot_list, f"{num_orbits_to_plot} orbits starting with Orbit {target_orbit_num}")
+
+    exit()
+    """
 
     # ---------- TESTING ------------
 
@@ -1151,11 +1369,40 @@ def main ():
     sydney = wgs84.latlon(-33.8688, 151.2093) #33.8688deg S, 151.2093deg E
 
     src = blacksburg
-    dest = sydney
+    #dest = sydney
+    dest = london
 
     print(f'Source position: {src}')
     print(f'Destination position: {dest}')
 
+    sat_pos_good = False
+    while (not sat_pos_good):
+        increment_time()
+        print(f"Current time: {cur_time}", end="\r")
+        if find_route_dijkstra(src, dest) != -1:
+            sat_pos_good = True
+    print("\n")
+    packets_to_process = True
+    while (packets_to_process):
+        packets_to_process = False
+        for routing_sat in sat_object_list:
+            if len(routing_sat.xmt_qu) > 0:
+                packets_to_process = True
+                routing_sat.directed_routing_xmt_cycle()
+        for routing_sat in sat_object_list:
+            if len(routing_sat.rcv_qu) > 0:
+                packets_to_process = True
+                routing_sat.directed_routing_rcv_cycle()
+    exit ()
+
+    
+    #print(f"Random sat position vector: {random_routing_sat.sat.at(cur_time).position.km}")
+    #sat_east_angle = get_vector_rad_angle(random_routing_sat.sat.at(cur_time).position.km, sat_east.sat.at(cur_time).position.km)
+    #print(f"Angle from selected sat and sat_is: {sat_east_angle} (in radians)")
+
+
+
+    """
     #random_num = random.randint(0, (orbit_cnt * sats_per_orbit)-1)
     random_num = 503
     random_routing_sat = sat_object_list[random_num]
@@ -1165,24 +1412,15 @@ def main ():
     routing_sat_north = random_routing_sat.get_sat_North()
     routing_sat_south = random_routing_sat.get_sat_South()
 
-    routing_sat_fore = random_routing_sat.get_fore_sat()
-    routing_sat_aft = random_routing_sat.get_aft_sat()
-
-    #print(f"Random sat position vector: {random_routing_sat.sat.at(cur_time).position.km}")
-    #sat_east_angle = get_vector_rad_angle(random_routing_sat.sat.at(cur_time).position.km, sat_east.sat.at(cur_time).position.km)
-    #print(f"Angle from selected sat and sat_is: {sat_east_angle} (in radians)")
-
     random_sat_satnum = random_routing_sat.sat.model.satnum
     sat_north_satnum = routing_sat_north.sat.model.satnum
     sat_south_satnum = routing_sat_south.sat.model.satnum
     sat_east_satnum = routing_sat_east.sat.model.satnum
     sat_west_satnum = routing_sat_west.sat.model.satnum
 
-    fore_sat_satnum = routing_sat_fore.sat.model.satnum
-    aft_sat_satnum = routing_sat_aft.sat.model.satnum
 
-    print(f"East_sat orbit number: {routing_sat_east.orbit_number}; Random sat's stated orbit number east: {random_routing_sat.orbit_number_East}")
-    print(f"West_sat orbit number: {routing_sat_west.orbit_number}; Random sat's stated orbit number west: {random_routing_sat.orbit_number_West}")
+    print(f"East_sat orbit number: {routing_sat_east.orbit_number}; Random sat's stated orbit number east: {random_routing_sat.succeeding_orbit_number}")
+    print(f"West_sat orbit number: {routing_sat_west.orbit_number}; Random sat's stated orbit number west: {random_routing_sat.preceeding_orbit_number}")
 
     heading = get_heading_by_satnum_degrees(random_routing_sat.sat.model.satnum)
     print(f"Selected sat: {random_routing_sat.sat.model.satnum} has heading of {heading}deg")
@@ -1204,7 +1442,73 @@ def main ():
         #print(cur_time.utc_jpl())
         print(f"Sat pos: Lat:{lat:.2f}\tLon:{lon:.2f}\tHeading: {heading:.2f} |\tFore: {fore_sat_bearing:.2f}\tAft: {aft_sat_bearing:.2f}\tEast: {sat_east_bearing:.2f}\tWest: {sat_west_bearing:.2f}")
         increment_time()
+    """
+    """
+    random_num = 503
+    print(f"Starting with satellite satnum {random_num}")
+    random_routing_sat = sat_object_list[random_num]
+
+    routing_sat_fore = random_routing_sat.get_fore_sat()
+    routing_sat_aft = random_routing_sat.get_aft_sat()
+
+    random_sat_satnum = random_routing_sat.sat.model.satnum
+    fore_sat_satnum = routing_sat_fore.sat.model.satnum
+    aft_sat_satnum = routing_sat_aft.sat.model.satnum
+    
+    interval = 60 # seconds
+    set_time_interval(interval)
+    loop_cnt = 90 # 90
+    for i in range(loop_cnt):
+        port_int_bearing = -1
+        port_int_distance = -1
+        port_int_rate = -1
+        port_int_satnum = -1
+        starboard_int_bearing = -1
+        starboard_int_distance = -1
+        starboard_int_rate = -1
+        starboard_int_satnum = -1
+        heading = get_heading_by_satnum_degrees(random_routing_sat.sat.model.satnum)
+        lat, lon = random_routing_sat.get_sat_lat_lon_degrees()
+        #fore_sat_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, fore_sat_satnum, heading)
+        #aft_sat_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, aft_sat_satnum, heading)
+        fore_sat_distance, _ = get_sat_distance_and_rate_by_satnum(random_sat_satnum, fore_sat_satnum)
+        aft_sat_distance, _ = get_sat_distance_and_rate_by_satnum(random_sat_satnum, aft_sat_satnum)
+        preceeding_orbit_sat_satnum, preceeding_orbit_sat_int = random_routing_sat.check_preceeding_orbit_sat_available()
+        if not preceeding_orbit_sat_satnum is None:
+            if 'port' in preceeding_orbit_sat_int:
+                port_int_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, preceeding_orbit_sat_satnum, heading)
+                port_int_distance, port_int_rate = get_sat_distance_and_rate_by_satnum(random_sat_satnum, preceeding_orbit_sat_satnum)
+                port_int_satnum = preceeding_orbit_sat_satnum
+            else:
+                starboard_int_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, preceeding_orbit_sat_satnum, heading)
+                starboard_int_distance, starboard_int_rate = get_sat_distance_and_rate_by_satnum(random_sat_satnum, preceeding_orbit_sat_satnum)
+                starboard_int_satnum = preceeding_orbit_sat_satnum
+        succeeding_orbit_sat_satnum, succeeding_orbit_sat_int = random_routing_sat.check_succeeding_orbit_sat_available()
+        if not succeeding_orbit_sat_satnum is None:
+            if 'port' in succeeding_orbit_sat_int:
+                port_int_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, succeeding_orbit_sat_satnum, heading)
+                port_int_distance, port_int_rate = get_sat_distance_and_rate_by_satnum(random_sat_satnum, succeeding_orbit_sat_satnum)
+                port_int_satnum = succeeding_orbit_sat_satnum
+            else:
+                starboard_int_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, succeeding_orbit_sat_satnum, heading)
+                starboard_int_distance, starboard_int_rate = get_sat_distance_and_rate_by_satnum(random_sat_satnum, succeeding_orbit_sat_satnum)
+                starboard_int_satnum = succeeding_orbit_sat_satnum
+        #print(f"Sat Heading: {heading:.2f} |\tFore ({fore_sat_satnum}): {fore_sat_bearing:.2f}\tAft ({aft_sat_satnum}): {aft_sat_bearing:.2f}\tPor sat ({port_int_satnum}): {port_int_bearing:.2f}\tdist: {port_int_distance:.2f}\trate: {port_int_rate:.2f}\tSta sat ({starboard_int_satnum}): {starboard_int_bearing:.2f}\tdist: {starboard_int_distance:.2f}\trate: {starboard_int_rate:.2f}")
+        print(f"Sat Lat: {lat:06.2f} | Fore ({fore_sat_satnum}[{random_routing_sat.sat_index_North}]): dist: {fore_sat_distance:.0f}| Aft ({aft_sat_satnum}[{random_routing_sat.sat_index_South}]): dist: {aft_sat_distance:.0f}| Por sat ({port_int_satnum:3.0f}): {port_int_bearing:6.2f} dist: {port_int_distance:3.0f} rate: {port_int_rate:5.2f}| Sta sat ({starboard_int_satnum:3.0f}): {starboard_int_bearing:6.2f} rate: {starboard_int_rate:5.2f} dist: {starboard_int_distance:3.0f}")
+        #if (loop_cnt%10) == 0:
+        if False:
+            plot_list = [random_sat_satnum, fore_sat_satnum, aft_sat_satnum]
+            if not preceeding_orbit_sat_satnum is None:
+                plot_list.append(preceeding_orbit_sat_satnum)
+            if not succeeding_orbit_sat_satnum is None:
+                plot_list.append(succeeding_orbit_sat_satnum)
+            draw_static_plot(plot_list, f'Satnum: {random_sat_satnum}; Lat: {lat:.2f}', False)
+        increment_time()
+
     exit()
+    """
+
+    """
     random_sat_geoc = random_routing_sat.sat.at(cur_time)
     random_sat_geoc_next = random_routing_sat.sat.at(cur_time_next)
     random_sat_bearing = get_bearing_degrees(random_sat_geoc, random_sat_geoc_next)
@@ -1238,7 +1542,7 @@ def main ():
     print(f"Sat_south rel bearing: {sat_south_bearing_rel}deg")
     print(f"Sat_east rel bearing: {sat_east_bearing_rel}deg")
     print(f"Sat_west rel bearing: {sat_west_bearing_rel}deg")
-
+    """
 
 
 
