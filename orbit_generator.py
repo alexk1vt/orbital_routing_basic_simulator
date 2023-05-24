@@ -1082,7 +1082,7 @@ def find_route_random(src, dest):
     print(f'Made {len(sat_traverse_list)} satellite hops to get to destination; distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time: {compute_time}')
     draw_static_plot(sat_traverse_list, title=f'Random: {len(sat_traverse_list)} satellite hops; distance {link_distance:.2f}km')
 
-def find_route_dijkstra(src, dest):
+def find_route_dijkstra_dist(src, dest):
     print("Starting Dijkstra routing")
     # Find satellite at least 60 deg above the horizon at source and destination
     # FIX: distances must also include the satnum of which sat put the lowest distance!  Must follow that listing backwards to id path to the source
@@ -1214,6 +1214,138 @@ def find_route_dijkstra(src, dest):
     packet = [traverse_list[0], traverse_list[:-1], [], 0, dest]
     send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
     
+def find_route_dijkstra_hop(src, dest):
+    print("Starting Dijkstra routing")
+    # Find satellite at least 60 deg above the horizon at source and destination
+    # FIX: distances must also include the satnum of which sat put the lowest distance!  Must follow that listing backwards to id path to the source
+    sat_found = False
+    for r_sat in sat_object_list:
+        if (r_sat.is_overhead_of(src)):
+            topo_position = (r_sat.sat - src).at(cur_time)
+            alt, az, dist = topo_position.altaz()    
+            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at source')
+            print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
+            sat_found = True
+            break # Just go with first satellite
+    if not sat_found:
+        print(f"Unable to find satellite over source!")
+        return -1
+    src_routing_sat = r_sat
+
+    sat_found = False
+    for r_sat in sat_object_list:
+        if (r_sat.is_overhead_of(dest)):
+            topo_position = (r_sat.sat - dest).at(cur_time)
+            alt, az, dist = topo_position.altaz()    
+            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at destination')
+            print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
+            sat_found = True
+            break # Just go with first satellite
+    if not sat_found:
+        print(f"Unable to find satellite over destination!")
+        return -1
+    dest_routing_sat = r_sat
+
+    visited_sat_dict = {} #(satnum, (distance, satnum_who_assigned_distance))
+
+    unvisted_sat_dict = {} # dict of satnums with respective tentative distance values
+    for r_sat in sat_object_list:
+        unvisted_sat_dict[r_sat.sat.model.satnum] = (float('inf'), -1)
+
+    cur_sat = src_routing_sat
+    unvisted_sat_dict[cur_sat.sat.model.satnum] = (0, -1)
+    
+    cur_sat_dist = 0
+    route_found = False
+
+    start = time.process_time()
+    loop_cnt = 0
+
+    print("Starting Dijsktra Loop")
+    while True:
+        print(f"Loop count: {loop_cnt}", end="\r")
+        
+        neigh_fore = cur_sat.get_fore_sat()
+        neigh_aft = cur_sat.get_aft_sat()
+        neigh_preceeding_orbit_satnum, _ = cur_sat.check_preceeding_orbit_sat_available()
+        neigh_succeeding_orbit_satnum, _ = cur_sat.check_succeeding_orbit_sat_available()
+        if neigh_preceeding_orbit_satnum is None: neigh_preceeding_orbit = None
+        else: neigh_preceeding_orbit = get_routing_sat_obj_by_satnum(neigh_preceeding_orbit_satnum)
+        if neigh_succeeding_orbit_satnum is None: neigh_succeeding_orbit = None
+        else: neigh_succeeding_orbit = get_routing_sat_obj_by_satnum(neigh_succeeding_orbit_satnum)
+
+        cur_sat_neigh_list = [neigh_fore, neigh_aft, neigh_preceeding_orbit, neigh_succeeding_orbit]
+
+        # Set distances for adjancent satellites
+        for testing_sat in cur_sat_neigh_list:
+            if not testing_sat is None:
+                if testing_sat.sat.model.satnum in unvisted_sat_dict:
+                    testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
+                    tentative_dist = cur_sat_dist + testing_sat_dist
+                    if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
+                        unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
+
+        # Move current satellite to visited_sat_dict and remove it's entry in unvisted_sat_dict
+        visited_sat_dict[cur_sat.sat.model.satnum] = unvisted_sat_dict[cur_sat.sat.model.satnum]
+        del unvisted_sat_dict[cur_sat.sat.model.satnum]
+        
+        # Test to see if we just set the destination node as 'visited'
+        if cur_sat.sat.model.satnum == dest_routing_sat.sat.model.satnum:
+            print("Algorithm reached destination node")
+            route_found = True  # Indicate the destination has been reached and break out of the loop
+            break
+
+        # See if we've run out of unvisited nodes
+        if len(unvisted_sat_dict) < 1:
+            break
+
+        # Continuing on, so find the next unvisited node with the lowest distance
+        next_hop_satnum = None
+        next_hop_dist = float('inf')
+        for unvisited_satnum in unvisted_sat_dict.keys():
+            if unvisted_sat_dict[unvisited_satnum][0] < next_hop_dist:
+                next_hop_dist = unvisted_sat_dict[unvisited_satnum][0]
+                next_hop_satnum = unvisited_satnum
+        #print(f"Next node visit is to satnum: {unvisited_satnum}")
+
+        # Were there no nodes with distances other than infinity?  Something went wrong
+        if next_hop_dist == float('inf'):
+            print(f"No more nieghbors without infinite distances to explore.  {len(visited_sat_dict)} visited nodes; {len(unvisted_sat_dict)} unvisted nodes remaining")
+            break
+
+        # Get sat routing object for indicated satnum
+        cur_sat = get_routing_sat_obj_by_satnum(next_hop_satnum)
+        cur_sat_dist = unvisted_sat_dict[cur_sat.sat.model.satnum][0]
+        #for routing_sat_obj in sat_object_list:
+        #    if routing_sat_obj.sat.model.satnum == next_hop:
+        #        cur_sat = routing_sat_obj
+        #        break
+        loop_cnt += 1
+    # Done with loop; check if a route was found
+    if not route_found:
+        print(f"Unable to find route using dijkstra's algorithm")
+        return
+    
+    # Route was found, so retrace steps
+    traverse_list = [dest_routing_sat.sat.model.satnum]
+    cur_satnum = dest_routing_sat.sat.model.satnum
+    link_distance = 0
+    while True:
+        next_hop = visited_sat_dict[cur_satnum][1]
+        link_distance += get_sat_distance(get_routing_sat_obj_by_satnum(cur_satnum).sat.at(cur_time), get_routing_sat_obj_by_satnum(next_hop).sat.at(cur_time))
+        traverse_list.insert(0, next_hop)
+        if next_hop == src_routing_sat.sat.model.satnum:
+            break
+        cur_satnum = next_hop
+
+    compute_time = time.process_time() - start
+    print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
+    print(f"Transit list:\n{traverse_list}")
+    #draw_static_plot(traverse_list, title=f'Dijkstra: {len(traverse_list)} hops, {link_distance:.2f}km distance')
+    traverse_list.reverse()
+    packet = [traverse_list[0], traverse_list[:-1], [], 0, dest]
+    send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
+
 # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
 def send_directed_routing_packet_from_source(starting_satnum, starting_terminal, packet):  # must have next_hop_list pre_built
     print(f"::send_directed_routing_packet_from_source():: starting_satnum: {starting_satnum}, starting_terminal: {starting_terminal}, packet: {packet}")
@@ -1427,7 +1559,7 @@ def main ():
     for _ in range(tries): #try at most 50 times
         increment_time()
         print(f"Current time: {cur_time}", end="\r")
-        if find_route_dijkstra(src, dest) != -1:
+        if find_route_dijkstra_dist(src, dest) != -1:
             found = True
             break
     if not found:
