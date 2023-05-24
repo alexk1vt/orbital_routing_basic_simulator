@@ -1,0 +1,16 @@
+routing thoughts:
+
+24MAY
+description of spherical geometry:
+https://en.wikipedia.org/wiki/Spherical_geometry
+
+distance between two points on spherical plane:
+https://eclipse2017.nasa.gov/crow-flies-spherical-planet#:~:text=The%20shortest%20distance%20between%20any,the%20center%20of%20the%20sphere.
+
+direction of one point to another:
+- I think I already have this solved under the 'bearing' functions
+
+so I want to minimize the distance from current location to destination
+- two directions will minimize, two will not
+
+what does DiScoRoute do?
