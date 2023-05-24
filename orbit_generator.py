@@ -56,21 +56,23 @@ class RoutingSat:
         self.starboard_sat_satnum = None
         self.xmt_qu = []  # these are the send/receive queues - their contents depend on the routing algorithm being used
         self.rcv_qu = []
+        self.packet_qu = []
 
     # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_gs] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
     def directed_routing_rcv_cycle(self):
+        print(f"::directed_routing_rcv_cycle: satellite {self.sat.model.satnum}")
         self.port_sat_satnum = None
         self.starboard_sat_satnum = None
         preceeding_orbit_satnum, preceeding_orbit_int = self.check_preceeding_orbit_sat_available()
         succeeding_orbit_satnum, succeeding_orbit_int = self.check_succeeding_orbit_sat_available()
         if not preceeding_orbit_satnum is None:
             if preceeding_orbit_int == 'port':
-                self.port_sat_index = preceeding_orbit_satnum
+                self.port_sat_satnum = preceeding_orbit_satnum
             else:
-                self.starboard_sat_index = preceeding_orbit_satnum
+                self.starboard_sat_satnum = preceeding_orbit_satnum
         if not succeeding_orbit_satnum is None:
             if succeeding_orbit_int == 'port':
-                self.port_sat_index = succeeding_orbit_satnum
+                self.port_sat_satnum = succeeding_orbit_satnum
             else:
                 self.starboard_sat_index = succeeding_orbit_satnum
 
@@ -86,13 +88,14 @@ class RoutingSat:
                     print(f"Satellite {self.sat.model.satnum} is not 30deg overhead destination terminal")
                     self.rcv_qu.remove(packet)
                     continue
-                packet[3] += dist
+                packet[3] += dist.km
                 print(f"{self.sat.model.satnum}: Packet reached destination in {len(packet[2])} hops.  Total distance: {packet[3]}km")
             else:
                 target_satnum = packet[1].pop() #the head of the next_hop_list
+                print(f"::directed_routing_rcv_cycle:: satellite {self.sat.model.satnum}, target_satnum: {target_satnum}, next hop list: {packet[1]}")
                 if (self.fore_sat_satnum == target_satnum) or (self.aft_sat_satnum == target_satnum) or (self.port_sat_satnum == target_satnum) or (self.starboard_sat_satnum == target_satnum):
                     packet[2].append(self.sat.model.satnum)
-                    target_distance, _ = get_sat_distance_and_rate_by_satnum(target_satnum)
+                    target_distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, target_satnum)
                     packet[3] += target_distance
                     self.xmt_qu.insert(1, packet) # add packet to transmit queue for sending during transmit cycle
                     self.rcv_qu.remove(packet)
@@ -101,9 +104,56 @@ class RoutingSat:
                     print(f"({self.sat.model.satnum})No connection to satnum {target_satnum}")
                     self.rcv_qu.remove(packet)
     
+    # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_gs] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
+    def directed_routing_process_packet_queue(self):
+        print(f"::directed_routing_process_packet_queue: satellite {self.sat.model.satnum}")
+        self.port_sat_satnum = None
+        self.starboard_sat_satnum = None
+        preceeding_orbit_satnum, preceeding_orbit_int = self.check_preceeding_orbit_sat_available()
+        succeeding_orbit_satnum, succeeding_orbit_int = self.check_succeeding_orbit_sat_available()
+        if not preceeding_orbit_satnum is None:
+            if preceeding_orbit_int == 'port':
+                self.port_sat_satnum = preceeding_orbit_satnum
+            else:
+                self.starboard_sat_satnum = preceeding_orbit_satnum
+        if not succeeding_orbit_satnum is None:
+            if succeeding_orbit_int == 'port':
+                self.port_sat_satnum = succeeding_orbit_satnum
+            else:
+                self.starboard_sat_index = succeeding_orbit_satnum
+
+        for packet in self.packet_qu:
+            if self.sat.model.satnum  == packet[0]:
+                if not self.is_overhead_of(packet[4]):
+                    print(f"Reached final satnum, but not overhead destination terminal!")
+                    self.packet_qu.remove(packet)
+                    continue
+                topo_position = (self.sat - packet[4]).at(cur_time)
+                alt, _, dist = topo_position.altaz()
+                if alt.degrees < 30:
+                    print(f"Satellite {self.sat.model.satnum} is not 30deg overhead destination terminal")
+                    self.packet_qu.remove(packet)
+                    continue
+                packet[3] += dist.km
+                print(f"{self.sat.model.satnum}: Packet reached destination in {len(packet[2])} hops.  Total distance: {packet[3]}km")
+                self.packet_qu.remove(packet)
+            else:
+                target_satnum = packet[1].pop() #the head of the next_hop_list
+                print(f"::directed_routing_rcv_cycle:: satellite {self.sat.model.satnum}, target_satnum: {target_satnum}, next hop list: {packet[1]}")
+                if (self.fore_sat_satnum == target_satnum) or (self.aft_sat_satnum == target_satnum) or (self.port_sat_satnum == target_satnum) or (self.starboard_sat_satnum == target_satnum):
+                    packet[2].append(self.sat.model.satnum)
+                    target_distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, target_satnum)
+                    packet[3] += target_distance
+                    add_to_packet_qu_by_satnum(target_satnum, packet)  # add packet to target sat's packet queue
+                    self.packet_qu.remove(packet)
+                else:
+                    print(f"({self.sat.model.satnum})No connection to satnum {target_satnum}")
+                    self.packet_qu.remove(packet)
+
     def directed_routing_xmt_cycle(self):
         for packet in self.xmt_qu:
-            target_satnum = packet[1][0] #read top of next hop list
+            target_satnum = packet[1][-1] #read top of next hop list
+            print(f"::directed_routing_xmit_cycle():: Sat {self.sat.model.satnum}: target_satnum: {target_satnum}, packet: {packet}")
             add_to_rcv_qu_by_satnum(target_satnum, packet)
             self.xmt_qu.remove(packet)
 
@@ -377,7 +427,13 @@ class RoutingSat:
 ## :: General Functions ::
 def add_to_rcv_qu_by_satnum(target_satnum, packet):
     target_routing_sat = sat_object_list[target_satnum]
+    print(f"add_to_rcv_qu_by_satnum: target_satnum: {target_satnum}, packet: {packet}")
     target_routing_sat.rcv_qu.insert(0, packet)
+
+def add_to_packet_qu_by_satnum(target_satnum, packet):
+    target_routing_sat = sat_object_list[target_satnum]
+    print(f"add_to_packet_qu_by_satnum: target_satnum: {target_satnum}, packet: {packet}")
+    target_routing_sat.packet_qu.insert(0, packet)
 
 def get_routing_sat_obj_by_satnum(satnum):
     if len(sat_object_list) < 1:
@@ -486,6 +542,7 @@ def increment_time():
     cur_time = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
     new_python_time = python_t + timedelta(seconds = time_interval+1)
     cur_time_next = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
+    print(f"increment_time: Current time incremented to: {cur_time}")
 
 def set_time_interval(interval_seconds): # sets the time interval (in seconds)
     global time_interval
@@ -1071,47 +1128,32 @@ def find_route_dijkstra(src, dest):
 
     start = time.process_time()
     loop_cnt = 0
+
     print("Starting Dijsktra Loop")
     while True:
         print(f"Loop count: {loop_cnt}", end="\r")
         
         neigh_fore = cur_sat.get_fore_sat()
-        if neigh_fore is not None:
-            testing_sat = neigh_fore
-            if testing_sat.sat.model.satnum in unvisted_sat_dict:
-                testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
-                tentative_dist = cur_sat_dist + testing_sat_dist
-                if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
-                    unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
-                
         neigh_aft = cur_sat.get_aft_sat()
-        if neigh_aft is not None: 
-            testing_sat = neigh_aft
-            if testing_sat.sat.model.satnum in unvisted_sat_dict:
-                testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
-                tentative_dist = cur_sat_dist + testing_sat_dist
-                if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
-                    unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
+        neigh_preceeding_orbit_satnum, _ = cur_sat.check_preceeding_orbit_sat_available()
+        neigh_succeeding_orbit_satnum, _ = cur_sat.check_succeeding_orbit_sat_available()
+        if neigh_preceeding_orbit_satnum is None: neigh_preceeding_orbit = None
+        else: neigh_preceeding_orbit = get_routing_sat_obj_by_satnum(neigh_preceeding_orbit_satnum)
+        if neigh_succeeding_orbit_satnum is None: neigh_succeeding_orbit = None
+        else: neigh_succeeding_orbit = get_routing_sat_obj_by_satnum(neigh_succeeding_orbit_satnum)
 
-        neigh_preceeding_orbit, _ = cur_sat.check_preceeding_orbit_sat_available()
-        if neigh_preceeding_orbit is not None: 
-            testing_sat = get_routing_sat_obj_by_satnum(neigh_preceeding_orbit)
-            if testing_sat.sat.model.satnum in unvisted_sat_dict:
-                testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
-                tentative_dist = cur_sat_dist + testing_sat_dist
-                if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
-                    unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
+        cur_sat_neigh_list = [neigh_fore, neigh_aft, neigh_preceeding_orbit, neigh_succeeding_orbit]
 
-        neigh_succeeding_orbit, _ = cur_sat.check_succeeding_orbit_sat_available()
-        if neigh_succeeding_orbit is not None: 
-            testing_sat = get_routing_sat_obj_by_satnum(neigh_succeeding_orbit)
-            if testing_sat.sat.model.satnum in unvisted_sat_dict:
-                testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
-                tentative_dist = cur_sat_dist + testing_sat_dist
-                if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
-                    unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
+        # Set distances for adjancent satellites
+        for testing_sat in cur_sat_neigh_list:
+            if not testing_sat is None:
+                if testing_sat.sat.model.satnum in unvisted_sat_dict:
+                    testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
+                    tentative_dist = cur_sat_dist + testing_sat_dist
+                    if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
+                        unvisted_sat_dict[testing_sat.sat.model.satnum] = (tentative_dist, cur_sat.sat.model.satnum)
 
-        # Done setting distances for adjacent satellites, move current satellite to visited_sat_dict and remove it's entry in unvisted_sat_dict
+        # Move current satellite to visited_sat_dict and remove it's entry in unvisted_sat_dict
         visited_sat_dict[cur_sat.sat.model.satnum] = unvisted_sat_dict[cur_sat.sat.model.satnum]
         del unvisted_sat_dict[cur_sat.sat.model.satnum]
         
@@ -1136,7 +1178,7 @@ def find_route_dijkstra(src, dest):
 
         # Were there no nodes with distances other than infinity?  Something went wrong
         if next_hop_dist == float('inf'):
-            print(f"No more nieghbors without infinite distances to explore.  {len(unvisted_sat_dict)} unvisted nodes remaining")
+            print(f"No more nieghbors without infinite distances to explore.  {len(visited_sat_dict)} visited nodes; {len(unvisted_sat_dict)} unvisted nodes remaining")
             break
 
         # Get sat routing object for indicated satnum
@@ -1153,8 +1195,6 @@ def find_route_dijkstra(src, dest):
         return
     
     # Route was found, so retrace steps
-    #print(visited_sat_dict)
-    print(f'Visited list has {len(visited_sat_dict)} entries')
     traverse_list = [dest_routing_sat.sat.model.satnum]
     cur_satnum = dest_routing_sat.sat.model.satnum
     link_distance = 0
@@ -1171,15 +1211,16 @@ def find_route_dijkstra(src, dest):
     print(f"Transit list:\n{traverse_list}")
     #draw_static_plot(traverse_list, title=f'Dijkstra: {len(traverse_list)} hops, {link_distance:.2f}km distance')
     traverse_list.reverse()
-    packet = [traverse_list[-1], traverse_list, [], 0, dest]
-    send_directed_routing_packet_from_source(traverse_list[0], src, packet)
+    packet = [traverse_list[0], traverse_list[:-1], [], 0, dest]
+    send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
     
 # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
 def send_directed_routing_packet_from_source(starting_satnum, starting_terminal, packet):  # must have next_hop_list pre_built
+    print(f"::send_directed_routing_packet_from_source():: starting_satnum: {starting_satnum}, starting_terminal: {starting_terminal}, packet: {packet}")
     starting_sat = get_routing_sat_obj_by_satnum(starting_satnum)
 
     topo_position = (starting_sat.sat - starting_terminal).at(cur_time)
-    alt, az, dist = topo_position.altaz()
+    alt, _, dist = topo_position.altaz()
     if not starting_sat.is_overhead_of(starting_terminal):
         print(f"Satellite {starting_satnum} is not overhead starting terminal {starting_terminal}")
         return
@@ -1187,22 +1228,11 @@ def send_directed_routing_packet_from_source(starting_satnum, starting_terminal,
         print(f"Satellite {starting_satnum} is not 30deg over head starting terminal {starting_terminal}")
         return
     packet[3] += dist.km
-    add_to_rcv_qu_by_satnum(starting_satnum, packet)
+    add_to_packet_qu_by_satnum(starting_satnum, packet)
+    #add_to_rcv_qu_by_satnum(starting_satnum, packet)
     
-def main ():
-    #time_scale = load.timescale()
-    #tle_path = '/home/alexk1/Documents/satellite_data/starlink_9MAY23.txt'
-    #tle_path = '/home/alexk1/Documents/satellite_data/STARLINK-1071.txt'
-    tle_path = './STARLINK-1071.txt'
-    #starlink_url = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle'   
 
-    satellites = load.tle_file(tle_path)
-    print('Loaded', len(satellites), 'satellites')
-    source_sat = satellites[0]
-
-    print(f'Source satellite epoch: {source_sat.epoch.utc_jpl()}')
-
-    
+def build_constellation(source_sat):
 
     # load tle into pandas data_frame to pull data
     #col_headers = [0, 1, 2, 3, 4, 5, 6, 7, 8]
@@ -1317,7 +1347,24 @@ def main ():
 
     global num_sats
     num_sats = orbit_cnt * sats_per_orbit
-    
+
+
+
+def main ():
+    #time_scale = load.timescale()
+    #tle_path = '/home/alexk1/Documents/satellite_data/starlink_9MAY23.txt'
+    #tle_path = '/home/alexk1/Documents/satellite_data/STARLINK-1071.txt'
+    tle_path = './STARLINK-1071.txt'
+    #starlink_url = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle'   
+
+    satellites = load.tle_file(tle_path)
+    print('Loaded', len(satellites), 'satellites')
+    source_sat = satellites[0]
+
+    print(f'Source satellite epoch: {source_sat.epoch.utc_jpl()}')
+
+    build_constellation(source_sat)
+        
     """
     print(f'\n~~~~~~~~~~ Comparing fake_sat 0 against source satellite ~~~~~~~~~~')
     print(f'   fake_sat 0                           {source_sat.name}')
@@ -1375,24 +1422,25 @@ def main ():
     print(f'Source position: {src}')
     print(f'Destination position: {dest}')
 
-    sat_pos_good = False
-    while (not sat_pos_good):
+    tries = 50
+    found = False
+    for _ in range(tries): #try at most 50 times
         increment_time()
         print(f"Current time: {cur_time}", end="\r")
         if find_route_dijkstra(src, dest) != -1:
-            sat_pos_good = True
+            found = True
+            break
+    if not found:
+        print(f"Could not find satellites over both source and destination after {tries} tries")
     print("\n")
     packets_to_process = True
     while (packets_to_process):
         packets_to_process = False
         for routing_sat in sat_object_list:
-            if len(routing_sat.xmt_qu) > 0:
+            if len(routing_sat.packet_qu) > 0:
                 packets_to_process = True
-                routing_sat.directed_routing_xmt_cycle()
-        for routing_sat in sat_object_list:
-            if len(routing_sat.rcv_qu) > 0:
-                packets_to_process = True
-                routing_sat.directed_routing_rcv_cycle()
+                print(f"Packets in queue to process for satellite: {routing_sat.sat.model.satnum}")
+                routing_sat.directed_routing_process_packet_queue()
     exit ()
 
     
