@@ -14,3 +14,42 @@ so I want to minimize the distance from current location to destination
 - two directions will minimize, two will not
 
 what does DiScoRoute do?
+- takes geodesic geometry to reduce the routing between two satellites to a rectangle on a curve (where source and destinatino are on opposite corners)
+  + this allows author to identify minimum number of hops
+  + also able to reduce problem to directed acyclic graph - there are faster algorithms than dijkstra when using DAG
+
+Random route:
+- knows two acceptable directions, knows number of hops in which direction
+- do they specify on how they calculate number of hops?
+  + assuming it's a matter of taking angle from source and destination in lat and lon and dividing by angle distance between sats
+
+** NOTE **:
+this paper states that dijkstra doesn't always use minimum hops, just min distance
+ - I can do a min-hop version of dijkstra
+
+This is fine, becaues it still sounds like centrally calculated 
+  - focus on dynamic!
+    > this will be more like the random calculation!
+      + still pre-compute max number of hops in either direction, but include that as a weight
+
+Dynamic routing weights:
+- max hop count in either direction
+  + actually, weigh interfaces based on whether they are going in proper direction or not - don't worry about hop count
+- link congestion
+- link distance
+- recent link status
+
+sat's should already know:
+- ground track lat/lon
+- direction (NE/NW/SE/SW) of all available interfaces
+
+dynamic route direction:
+- know lat/lon of destination terminal
+- do simple test as to which 
+
+
+try to find a way to improve by pre-computing on sending side... (hybrid...)
+- maybe use directed routing until a target link is no longer preferred (either down, has too bad of a history, or is too congested), then switch to dynamic?
+
+Try to focus on always trying to minimize
+- just calc value based on each interface and choose lowest value
