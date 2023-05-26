@@ -53,3 +53,26 @@ try to find a way to improve by pre-computing on sending side... (hybrid...)
 
 Try to focus on always trying to minimize
 - just calc value based on each interface and choose lowest value
+
+
+this routing isn't like standard network routing where a target network is identified and there is either a default path to forward unknown traffic or another router says it knows how to get somewhere
+
+options:
+- treat individual satellites as destination networks (target satellite is pre-computed at ground station based on destination termianl location)
+  + because satellite footprint constantly change, satellites couldn't cache satellites based on destinatino terminal id for more than a few minutes (if that).  But so long as ground station has latest TLEs (or equivelients), no problem
+  + however, satellite neighbors don't really change in walker-delta constellations (verify) except for following cases:
+    > at latitude extremes, satellite orientation blocks connections to satellites of neighboring orbits (generally, i guess this could be overcome through hardware design)
+    > port / starboard nieghbors switch depending on whether ascending/descending (neighboring orbits never change E/W orientation, just the direction the satellites are facing (N/S))
+      * NOTE: it is likely there is less bandwidth hopping between orbits than hopping within orbit (due to constantly shifting neighbor orientation)  - might want to factor this into routing tables (rather than fixed value, expected bandwidth would be a function of altitude 
+  + knowing this, what could dynamic routing leverage?
+    > can build link state tables
+      * not just neighbors, but probably neighbors' neighbors, etc...
+      * what would change periodically not based on orbital position?
+        # link up/down (maybe average BER?)
+        # link congestion (once threshold hit)
+    > references:
+      * every routing in an autonomous system (AS) knows the state of all other routers (https://www.metaswitch.com/knowledge-center/reference/what-is-open-shortest-path-first-ospf#:~:text=The%20OSPF%20protocol%20is%20a,the%20topology%20of%20the%20AS.)
+      * link state packets:  https://en.wikipedia.org/wiki/Link_state_packet#:~:text=Link%20State%20Packet%20(LSP)%20is,neighboring%20routers%20and%20associated%20networks.
+      * congestion control stuff
+        # https://sites.google.com/a/ncsu.edu/congestion-based-ospf/
+        # https://www.sciencedirect.com/science/article/pii/S1319157812000195
