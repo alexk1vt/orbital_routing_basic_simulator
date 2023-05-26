@@ -76,3 +76,30 @@ options:
       * congestion control stuff
         # https://sites.google.com/a/ncsu.edu/congestion-based-ospf/
         # https://www.sciencedirect.com/science/article/pii/S1319157812000195
+
+
+Routing table options:
+- satellites can maintain a table of all satellites in constellation (this is known and doesn't change frequently)
+- when a satellite state / link state changes, that gets advertised (via flood) to all other satellites
+  + however, when there are frequent / many changes, this can create backlog, consume bandwidth/computation, issues, etc...
+- try just neighbor of neighbor (n^2)
+  + ideally will localize frequent/numerous changes and not flood network
+  + still allow traffic to route around (maybe)
+  + what about issues occurring at latitude extremes (inability/reduced ability for inter-orbit links)?  Does n^2 provide enough range to route traffic around it?
+
+How to build scenarios:
+- queue up data packets for each interval (1 second interval?) and send
+- satellites will have ability to transmit specific number of packets during each interval from specific interfaces (determined by the link bandwidth)
+- if packet count exceeds packet bandwidth, a backlog will start
+  + satellites will have fixed backlog sizes - any packets that would exceed that size are dropped
+- maintian log of packets being sent and verify if they arrived, along with time, number of hops, etc...
+** ensure transmission to ground terminal is also considered - bandwidth will vary based on distance / angle of inclination
+
+
+Scenarios:
+- find most congested internet traffic flows (geographically) and replicate
+
+
+Ways I can impact scenarios:
+- satellites can be down
+- interfaces can be down (fore, aft, port, starboard)
