@@ -7,6 +7,8 @@ from datetime import date, timedelta
 from math import pi, floor, sqrt
 import math
 import time
+import os # for cpu_count()
+import threading # for multithreading
 
 # for plotting orbits
 import numpy as np
@@ -18,6 +20,10 @@ from matplotlib.animation import FuncAnimation
 draw_static_orbits = False
 draw_distributed_orbits = False
 testing = False
+
+# Multi threading
+do_multithreading = True
+num_threads = os.cpu_count() # 4
 
 # Global variables
 orbit_list = []
@@ -661,14 +667,26 @@ class RoutingSat:
                                         #  neigh_last_down:  (time),  - self setting
                                         #  neigh_congested: (True/False)} - neigh setting
 
-def all_sats_update_neigh_state():
-    print("::all_sats_update_neigh_state() :: publishing states to neighbors")
-    for r_sat in sat_object_list:
-        print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
-        r_sat.update_neigh_state() # publish link state to neighbors first!
-    print("\n::all_sats_update_neigh_state() :: updating internal states of neighbors")
-    for r_sat in sat_object_list:
-        print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
+# multi-threaded version of update_neigh_state()
+def mt_publish_state_to_neigh(thread_num):
+    sat_object_range = floor(len(sat_object_list) / num_threads)
+    start = thread_num * sat_object_range
+    end = start + sat_object_range
+    if thread_num == num_threads - 1:
+        end = len(sat_object_list)
+    print(f"::mt_update_neigh_state() :: thread {thread_num} : publishing states to neighbors from {start} to {end}")
+    for r_sat in sat_object_list[start:end]:
+        r_sat.update_neigh_state()
+    print(f"::mt_update_neigh_state() :: thread {thread_num} : finished publishing states to neighbors")
+
+def mt_update_neigh_state_table(thread_num):
+    sat_object_range = floor(len(sat_object_list) / num_threads)
+    start = thread_num * sat_object_range
+    end = start + sat_object_range
+    if thread_num == num_threads - 1:
+        end = len(sat_object_list)
+    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : updating internal states of neighbors from {start} to {end}")
+    for r_sat in sat_object_list[start:end]:
         for satnum in r_sat.neigh_state_dict: # now update internal link states
             last_neigh_status = r_sat.neigh_state_dict[satnum]['last_neigh_status']
             if last_neigh_status != cur_time:
@@ -678,7 +696,44 @@ def all_sats_update_neigh_state():
                 r_sat.neigh_state_dict[satnum]['neigh_up'] = True
                 if old_link_status == False:
                     r_sat.neigh_state_dict[satnum]['neigh_last_down'] = cur_time
-    print("\n")
+    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : finished updating internal neighbor state table")
+
+def all_sats_update_neigh_state():
+    print("::all_sats_update_neigh_state() :: publishing states to neighbors")
+    if do_multithreading:
+        thread_list = []
+        for index in range(num_threads):
+            thread = threading.Thread(target=mt_publish_state_to_neigh, args=(index,))
+            thread.start()
+            thread_list.append(thread)
+        for thread in thread_list:
+            thread.join()
+    else:
+        for r_sat in sat_object_list:
+            print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
+            r_sat.update_neigh_state() # publish link state to neighbors first!
+    print("\n::all_sats_update_neigh_state() :: updating internal states of neighbors")
+    if do_multithreading:
+        thread_list = []
+        for index in range(num_threads):
+            thread = threading.Thread(target=mt_update_neigh_state_table, args=(index,))
+            thread.start()
+            thread_list.append(thread)
+        for thread in thread_list:
+            thread.join()
+    else:
+        for r_sat in sat_object_list:
+            print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
+            for satnum in r_sat.neigh_state_dict: # now update internal link states
+                last_neigh_status = r_sat.neigh_state_dict[satnum]['last_neigh_status']
+                if last_neigh_status != cur_time:
+                    r_sat.neigh_state_dict[satnum]['neigh_up'] = False
+                else:
+                    old_link_status = r_sat.neigh_state_dict[satnum]['neigh_up']
+                    r_sat.neigh_state_dict[satnum]['neigh_up'] = True
+                    if old_link_status == False:
+                        r_sat.neigh_state_dict[satnum]['neigh_last_down'] = cur_time
+        print("\n")
 
 """
 def add_to_rcv_qu_by_satnum(target_satnum, packet):
