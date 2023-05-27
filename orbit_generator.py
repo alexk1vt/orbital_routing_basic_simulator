@@ -4,7 +4,7 @@ from sgp4.api import Satrec, WGS72
 #import pandas as pd
 import random
 from datetime import date, timedelta
-from math import pi, floor, sqrt
+from math import pi, floor, sqrt, ceil
 import math
 import time
 import os # for cpu_count()
@@ -20,10 +20,18 @@ from matplotlib.animation import FuncAnimation
 draw_static_orbits = False
 draw_distributed_orbits = False
 testing = False
+plot_dropped_packets = False
 
 # Multi threading
 do_multithreading = True
-num_threads = os.cpu_count() # 4
+num_threads = max(os.cpu_count()-2, 1) # 4
+
+# Global counters
+no_sat_overhead_src_cnt = 0
+no_sat_overhead_dest_cnt = 0
+num_packets_dropped = 0
+num_packets_sent = 0
+num_packets_received = 0
 
 # Global variables
 orbit_list = []
@@ -36,11 +44,13 @@ packet_schedule = {} # a dictionary with time interval integers as keys and list
 # Packet variables
 packet_bandwidth_per_sec = 100 # the number of packets a satellite can send in a one sec time interval (so this should be multiplied by the time interval to get the number of packets that can be sent in that time interval)
 packet_backlog_size = 1000 # the number of packets that can be stored in a satellite's queue (10 sec worth of data)
+packets_generated_per_interval = 100 # the number of packets generated per time interval by the packet scheduler
 
 # Time variables
 time_scale = load.timescale()
 time_interval = 1 # interval between time increments, measured in seconds
 secs_per_km = 0.0000033
+num_time_intervals = 10
 
 # Orbit characteristics
 # Starlink Shell 1:  https://everydayastronaut.com/starlink-group-6-1-falcon-9-block-5-2/
@@ -72,7 +82,10 @@ interface_dir_incorrect = 7
 interface_bandwidth_high = 1
 interface_bandwidth_middle = 2
 interface_bandwidth_low = 4
-neigh_congested = 2
+neigh_congested = 4
+neigh_neigh_congested = 3
+neigh_neigh_not_congested = 0
+neigh_neigh_link_down = 4
 neigh_not_congested = 0
 neigh_recently_down = 1
 neigh_not_recently_down = 0
@@ -104,14 +117,15 @@ class RoutingSat:
         self.port_int_up = True
         self.starboard_int_up = True
         self.heading = None # ensure this is referenced only when you know it has been set for the current time
+        self.congestion_cnt = 0
 
     # ::: distributed routing packet structure: [[prev_hop_list], distance_traveled, dest_gs, source_gs] - packet is at destination when satellite is above dest_gs
     def distributed_routing_link_state_process_packet_queue(self):
         if (self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval) or (len(self.packet_qu) == 0):
             return -1
-        print(f"::distributed_routing_link_state_process_packet_queue: satellite {self.sat.model.satnum}")
         sent_packet = False
 
+        global num_packets_dropped
         for packet in self.packet_qu:
             if self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval:
                 break
@@ -119,23 +133,30 @@ class RoutingSat:
                 topo_position = (self.sat - packet['dest_gs']).at(cur_time)
                 _, _, dist = topo_position.altaz()
                 packet['distance_traveled'] += dist.km
-                print(f"{self.sat.model.satnum}: Packet reached destination in {len(packet['prev_hop_list'])} hops.  Total distance: {int(packet['distance_traveled'])}km")
-                draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
+                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination in {len(packet['prev_hop_list'])} hops.  Total distance: {int(packet['distance_traveled'])}km == source: {packet['source_gs']} -- destination: {packet['dest_gs']}")
+                global num_packets_received
+                num_packets_received += 1
+                #if len(packet['prev_hop_list']) > 10:
+                #    draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
                 self.packet_qu.remove(packet)
                 sent_packet = True
                 self.packets_sent_cnt += 1
             elif len(packet['prev_hop_list']) > distributed_max_hop_count:
-                print(f"{self.sat.model.satnum}: Packet to destination {packet['dest_gs']} exceeded max hop count.  Dropping packet.")
-                draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['dest_gs']], title='distributed link-state dropped packet', draw_lines = True, draw_sphere = False)
+                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet to destination {packet['dest_gs']} exceeded max hop count.  Dropping packet.")
+                num_packets_dropped += 1
+                if plot_dropped_packets:
+                    draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"distributed link-state dropped packet - {len(packet['prev_hop_list'])} hops", draw_lines = True, draw_sphere = True)
                 self.packet_qu.remove(packet)
             else:
                 target_satnum = self.find_next_link_state_hop(packet['dest_gs'])
                 if target_satnum is None:
                     print(f"::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} - could not find next hop for packet.  Dropping packet.")
-                    draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['dest_gs']], title='distributed link-state dropped packet', draw_lines = True, draw_sphere = False)
+                    num_packets_dropped += 1
+                    if plot_dropped_packets:
+                        draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['dest_gs']], title='distributed link-state dropped packet', draw_lines = True, draw_sphere = False)
                     self.packet_qu.remove(packet)
                     continue
-                print(f"::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} setting next hop to satnum: {target_satnum}")
+                #print(f"::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} setting next hop to satnum: {target_satnum}")
                 packet['prev_hop_list'].append(self.sat.model.satnum)
                 target_distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, target_satnum)
                 packet['distance_traveled'] += target_distance
@@ -152,7 +173,6 @@ class RoutingSat:
     def directed_routing_process_packet_queue(self):
         if (self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval) or (len(self.packet_qu) == 0):
             return -1
-        print(f"::directed_routing_process_packet_queue: satellite {self.sat.model.satnum}")
         sent_packet = False
         self.port_sat_satnum = None
         self.starboard_sat_satnum = None
@@ -190,7 +210,7 @@ class RoutingSat:
                 self.packets_sent_cnt += 1
             else:
                 target_satnum = packet['next_hop_list'].pop() #the head of the next_hop_list
-                print(f"::directed_routing_rcv_cycle:: satellite {self.sat.model.satnum}, target_satnum: {target_satnum}, next hop list: {packet['next_hop_list']}")
+                #print(f"::directed_routing_rcv_cycle:: satellite {self.sat.model.satnum}, target_satnum: {target_satnum}, next hop list: {packet['next_hop_list']}")
                 if (self.fore_sat_satnum == target_satnum) or (self.aft_sat_satnum == target_satnum) or (self.port_sat_satnum == target_satnum) or (self.starboard_sat_satnum == target_satnum):
                     packet['prev_hop_list'].append(self.sat.model.satnum)
                     target_distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, target_satnum)
@@ -359,7 +379,7 @@ class RoutingSat:
             closest_sat_East = None
         elif len(routing_sat_list) > 1:
             ## find closest satellites
-            print(f"{len(routing_sat_list)} satellites found within latitude range, selecting closest")
+            #print(f"{len(routing_sat_list)} satellites found within latitude range, selecting closest")
             closest_sat_East = find_closest_routing_satellite(self, routing_sat_list)
         else:
             #print("Single Eastern satellite found")
@@ -383,7 +403,7 @@ class RoutingSat:
             closest_sat_West = None
         elif len(routing_sat_list) > 1:
             ## find closest satellites
-            print(f"{len(routing_sat_list)} satellites found within latitude range, selecting closest")
+            #print(f"{len(routing_sat_list)} satellites found within latitude range, selecting closest")
             closest_sat_West = find_closest_routing_satellite(self, routing_sat_list)
         else:
             #print("Single Western satellite found")
@@ -508,7 +528,6 @@ class RoutingSat:
         self.heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
         nearest_dist_metric = float('inf')
         nearest_neigh_routing_sat = None
-        print(f"Number of available neighbors to select for next hop: {len(avail_neigh_routing_sats)}")
         for neigh_routing_sat in avail_neigh_routing_sats:
             dist_metric = self.calc_link_state_dist_metric(neigh_routing_sat, dest_gs)
             if dist_metric < nearest_dist_metric:
@@ -517,7 +536,6 @@ class RoutingSat:
         if nearest_neigh_routing_sat is None:
             print("find_next_link_state_hop:  No next hop sat could be calculated")
             return None
-        print(f"find_next_link_state_hop: selected next hop for satnum: {nearest_neigh_routing_sat.sat.model.satnum} with dist_metric: {nearest_dist_metric}")
         return nearest_neigh_routing_sat.sat.model.satnum
 
     # calculate the distance metric for link state routing protocol    
@@ -562,7 +580,7 @@ class RoutingSat:
                 bandwidth_metric = interface_bandwidth_middle
         # check if neighbor sat is congested
         if self.neigh_state_dict[neigh_routing_sat.sat.model.satnum]['neigh_congested']:
-            print(f"Satellite {neigh_routing_sat.sat.model.satnum} reports traffic congestion")
+            #print(f"Satellite {neigh_routing_sat.sat.model.satnum} reports traffic congestion")
             congestion_metric = neigh_congested
         else:
             congestion_metric = neigh_not_congested
@@ -581,7 +599,6 @@ class RoutingSat:
                 recent_down_metric = neigh_recently_down
         # now add up all the values for the overall distance metric and return
         distance_metric = bearing_metric + bandwidth_metric + congestion_metric + recent_down_metric
-        print(f"Satellite {neigh_routing_sat.sat.model.satnum} distance metric {distance_metric} = bearing metric: {bearing_metric} + bandwidth metric: {bandwidth_metric} + congestion metric: {congestion_metric} + recent down metric: {recent_down_metric}")
         return distance_metric
 
     # find the bearing of the destination ground station relative to the current satellite
@@ -636,6 +653,9 @@ class RoutingSat:
         if congestion is None:
             if len(self.packet_qu) > int((packet_bandwidth_per_sec * time_interval) * .8):  # are we at 80% of our packet queue capacity?
                 neigh_congested = True
+                lat, lon = wgs84.latlon_of(self.sat.at(cur_time))
+                print(f"Satellite {self.sat.model.satnum} detects traffic congestion at {lat.degrees}, {lon.degrees}")
+                self.congestion_cnt += 1
             else:
                 neigh_congested = False
         # update link state for all available neighbors
@@ -674,10 +694,10 @@ def mt_publish_state_to_neigh(thread_num):
     end = start + sat_object_range
     if thread_num == num_threads - 1:
         end = len(sat_object_list)
-    print(f"::mt_update_neigh_state() :: thread {thread_num} : publishing states to neighbors from {start} to {end}")
+    print(f"::mt_update_neigh_state() :: thread {thread_num} : publishing states to neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
         r_sat.update_neigh_state()
-    print(f"::mt_update_neigh_state() :: thread {thread_num} : finished publishing states to neighbors")
+    print(f"::mt_update_neigh_state() :: thread {thread_num} : finished publishing states to neighbors", end='\r')
 
 def mt_update_neigh_state_table(thread_num):
     sat_object_range = floor(len(sat_object_list) / num_threads)
@@ -685,7 +705,7 @@ def mt_update_neigh_state_table(thread_num):
     end = start + sat_object_range
     if thread_num == num_threads - 1:
         end = len(sat_object_list)
-    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : updating internal states of neighbors from {start} to {end}")
+    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : updating internal states of neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
         for satnum in r_sat.neigh_state_dict: # now update internal link states
             last_neigh_status = r_sat.neigh_state_dict[satnum]['last_neigh_status']
@@ -696,7 +716,7 @@ def mt_update_neigh_state_table(thread_num):
                 r_sat.neigh_state_dict[satnum]['neigh_up'] = True
                 if old_link_status == False:
                     r_sat.neigh_state_dict[satnum]['neigh_last_down'] = cur_time
-    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : finished updating internal neighbor state table")
+    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : finished updating internal neighbor state table", end='\r')
 
 def all_sats_update_neigh_state():
     print("::all_sats_update_neigh_state() :: publishing states to neighbors")
@@ -743,9 +763,10 @@ def add_to_rcv_qu_by_satnum(target_satnum, packet):
 """
 def add_to_packet_qu_by_satnum(target_satnum, packet):
     target_routing_sat = sat_object_list[target_satnum]
-    print(f"add_to_packet_qu_by_satnum: target_satnum: {target_satnum}, packet: {packet}")
     if len(target_routing_sat.packet_qu) > packet_backlog_size:
         print(f"Packet queue for satnum {target_satnum} is full. Packet dropped.")
+        global num_packets_dropped
+        num_packets_dropped += 1
         return
     target_routing_sat.packet_qu.insert(0, packet)
 
@@ -1743,12 +1764,14 @@ def send_distributed_routing_packet_from_source(src, dest):
             sat_overhead = True
             break
     if not sat_overhead:
-        print(f"No satellite overhead starting terminal {src}")
+        print(f"No satellite overhead starting terminal {src}", end='\r')
+        global no_sat_overhead_src_cnt
+        no_sat_overhead_src_cnt += 1
         return -1
     distance = get_sat_distance(src.at(cur_time), routing_sat.sat.at(cur_time))
     # ::: distributed routing packet structure: [[prev_hop_list], distance_traveled, dest_gs] - packet is at destination when satellite is above dest_gs
     packet = {'prev_hop_list': [], 'distance_traveled': distance, 'dest_gs': dest, 'source_gs': src}
-    print(f"::send_distributed_routing_packet_from_source():: starting_terminal: {src}, packet: {packet}")
+    #print(f"::send_distributed_routing_packet_from_source():: starting_terminal: {src}, packet: {packet}")
     add_to_packet_qu_by_satnum(routing_sat.sat.model.satnum, packet)
 
 def build_constellation(source_sat):
@@ -1965,11 +1988,14 @@ def directed_dijkstra_distance_routing():
 def distributed_link_state_routing():
     max_time_inverals = 50
     for time_interval in range(max_time_inverals):
+        print(f"::distributed_link_state_routing::  Time interval: {time_interval}")
         if time_interval in packet_schedule:
             packet_send_list = packet_schedule[time_interval]
             for packet in packet_send_list:
                 src, dest = packet
                 send_distributed_routing_packet_from_source(src, dest)
+                global num_packets_sent
+                num_packets_sent += 1
             del packet_schedule[time_interval]
         print("Updating neighbor states")
         start = time.process_time()
@@ -1991,10 +2017,177 @@ def distributed_link_state_routing():
             print("No more packets to send in schedule")
             break
         increment_time()
+    if len(packet_schedule) > 0:
+        print("Failed to send all packets in schedule")
+        print(packet_schedule)
         
 # Maybe have a send queue, where time interval is the key and the value is a list of src/dest tuples
 
+def build_packet_schedule():
+    # establish city bandwidth utilization and common routes - using: https://global-internet-map-2021.telegeography.com/
+    # Ranked by internation bandwidth capacity
+    Frankfurt = wgs84.latlon(50.1109 * N, 8.6821 * E) # 1
+    London = wgs84.latlon(51.5072 * N, 0.1276 * W) # 2
+    Amsterdam = wgs84.latlon(52.3667 * N, 4.8945 * E) # 3
+    Paris = wgs84.latlon(48.8567 * N, 2.3508 * E) # 4
+    Singapore = wgs84.latlon(1.3521 * N, 103.8198 * E) # 5
+    Hong_Kong = wgs84.latlon(22.3193 * N, 114.1694 * E) # 6
+    Stockholm = wgs84.latlon(59.3293 * N, 18.0686 * E) # 7
+    Miami = wgs84.latlon(25.7617 * N, 80.1918 * W) # 8
+    Marseille = wgs84.latlon(43.2964 * N, 5.3700 * E) # 9
+    Los_Angeles = wgs84.latlon(34.0522 * N, 118.2437 * W) # 10
+    New_York = wgs84.latlon(40.7128 * N, 74.0060 * W) # 11
+    Vienna = wgs84.latlon(48.2082 * N, 16.3738 * E) # 12
+    Moscow = wgs84.latlon(55.7558 * N, 37.6173 * E) # 13
+    Milan = wgs84.latlon(45.4642 * N, 9.1900 * E) # 14
+    Tokyo = wgs84.latlon(35.6762 * N, 139.6503 * E) # 15
+    Istanbul = wgs84.latlon(41.0082 * N, 28.9784 * E) # 16
+    San_Francisco = wgs84.latlon(37.7749 * N, 122.4194 * W) # 17
+    Jakarta = wgs84.latlon(6.2088 * S, 106.8456 * E) # 18
+    Sofia = wgs84.latlon(42.6977 * N, 23.3219 * E) # 19
+    Madrid = wgs84.latlon(40.4168 * N, 3.7038 * W) # 20
+    Copenhagen = wgs84.latlon(55.6761 * N, 12.5683 * E) # 21
+    Budapest = wgs84.latlon(47.4979 * N, 19.0402 * E) # 22
+    Hamburg = wgs84.latlon(53.5511 * N, 9.9937 * E) # 23
+    Hanoi = wgs84.latlon(21.0278 * N, 105.8342 * E) # 24
+    Sao_Paulo = wgs84.latlon(23.5505 * S, 46.6333 * W) # 25
+    Buenos_Aires = wgs84.latlon(34.6037 * S, 58.3816 * W) # 26
+    Warsaw = wgs84.latlon(52.2297 * N, 21.0122 * E) # 27
+    Bangkok = wgs84.latlon(13.7563 * N, 100.5018 * E) # 28
+    Buchararest = wgs84.latlon(44.4268 * N, 26.1025 * E) # 29
+    Helsinki = wgs84.latlon(60.1699 * N, 24.9384 * E) # 30
+    Mumbai = wgs84.latlon(19.0760 * N, 72.8777 * E) # 31
+    Prague = wgs84.latlon(50.0755 * N, 14.4378 * E) # 32
+    Brussels = wgs84.latlon(50.8503 * N, 4.3517 * E) # 33
+    St_Petersburg = wgs84.latlon(59.9343 * N, 30.3351 * E) # 34
+    Dusseldorf = wgs84.latlon(51.2277 * N, 6.7735 * E) # 35
+    Washington = wgs84.latlon(38.9072 * N, 77.0369 * W) # 36
+    Chennai = wgs84.latlon(13.0827 * N, 80.2707 * E) # 37
+    Kuala_Lumpur = wgs84.latlon(3.1390 * N, 101.6869 * E) # 38
+    Rio_de_Janeiro = wgs84.latlon(22.9068 * S, 43.1729 * W) # 39
+    Oslo = wgs84.latlon(59.9139 * N, 10.7522 * E) # 40
+    Mexico_City = wgs84.latlon(19.4326 * N, 99.1332 * W) # 41
+    Beijing = wgs84.latlon(39.9042 * N, 116.4074 * E) # 42    
+    Zurich = wgs84.latlon(47.3769 * N, 8.5417 * E) # 43
+    Sydney = wgs84.latlon(33.8688 * S, 151.2093 * E) # 44
+    Santiago = wgs84.latlon(33.4489 * S, 70.6693 * W) # 45
+    Toronto = wgs84.latlon(43.6532 * N, 79.3832 * W) # 46
+    Bratislava = wgs84.latlon(48.1486 * N, 17.1077 * E) # 47
+    Seoul = wgs84.latlon(37.5665 * N, 126.9780 * E) # 48
+    Taipei = wgs84.latlon(25.0330 * N, 121.5654 * E) # 49
+    Riyadh = wgs84.latlon(24.7136 * N, 46.6753 * E) # 50
+
+    # Also need to create a range of random locations on the globe (to include oceans)
+    # A good percentage of links should come from the random location list!!!
+
+    # Major links between cities - basically eyeballed these using the map from the link above
+    # Category 0
+    city_links = [
+        [(Frankfurt, Paris),
+        (Frankfurt, Amsterdam),
+        (Frankfurt, London),
+        (Frankfurt, Moscow),
+        (Frankfurt, Vienna),
+        (London, New_York),
+        (Singapore, Jakarta)],
+    # Category 1
+        [(Marseille, Mumbai),
+        (Tokyo, Hong_Kong),
+        (Tokyo, Los_Angeles),
+        (Hong_Kong, Hanoi),
+        (Hong_Kong, Singapore),
+        (Singapore, Chennai),
+        (Singapore, Kuala_Lumpur),
+        (Singapore, Bangkok),
+        (Miami, Sao_Paulo),
+        (Paris, Madrid),
+        (Washington, Paris),
+        (Miami, Rio_de_Janeiro)],
+    # Category 2
+        [(Moscow, Stockholm),
+        (Sofia, Istanbul),
+        (Stockholm, Helsinki),
+        (Stockholm, Copenhagen),
+        (Stockholm, Oslo),
+        (Helsinki, St_Petersburg),
+        (Frankfurt, Istanbul),
+        (Amsterdam, London),
+        (Amsterdam, Paris),
+        (Amsterdam, Hamburg),
+        (New_York, Toronto),
+        (New_York, Sao_Paulo)],
+    # Category 3
+        [(Hong_Kong, Sydney),
+        (Sydney, San_Francisco),
+        (Sydney, Los_Angeles),
+        (San_Francisco, Hong_Kong),
+        (Los_Angeles, Mexico_City)]]
+
+    # For every time interval, we will generate a certain amount of traffic
+    # This traffic is generated randomly between two cities, but higher order
+    # link categories are more likely to be chosen
+    # Category 0: 50%, Category 1: 25%, Category 2: 15%, Category 3: 10%
+    # Variable specifying amount of traffic generated for each time inveral:  packets_generated_per_interval
+
+    global packet_schedule
+
+
+    for interval in range(num_time_intervals):
+        for packet_cnt in range(packets_generated_per_interval):
+            random_num = random.randint(0, 99)
+            if random_num < 50:
+                category = 0
+            elif random_num < 75:
+                category = 1
+            elif random_num < 90:
+                category = 2
+            else:
+                category = 3
+            category_size = len(city_links[category])
+            link = random.randint(0, category_size - 1)
+            city1, city2 = city_links[category][link]
+            if packet_cnt != 0:
+                order = random.randint(0, 1)
+                if order == 0:
+                    packet_schedule[interval].append((city1, city2))
+                else:
+                    packet_schedule[interval].append((city2, city1))
+            else: # if first packet for this time interval, create new list
+                packet_schedule[interval] = [(city1, city2)]
+            #print(f"Packet schedule[{interval}]: Category: {category} {packet_schedule[interval][-1]}")
+    #input("Press enter to continue...")
+
+    """
+    blacksburg = wgs84.latlon(37.2296 * N, 80.4139 * W) #37.2296deg N, 80.4139deg W
+    london = wgs84.latlon(51.5072 * N, 0.1276 * W)
+    sydney = wgs84.latlon(33.8688 * S, 151.2093 * E) #33.8688deg S, 151.2093deg E
+
+    src = blacksburg
+    #dest = sydney
+    dest = london
+
+    print(f'Source position: {src}')
+    print(f'Destination position: {dest}')
+
+    global packet_schedule
+    packet_schedule[0] = [(blacksburg, london)]
+    """
+def print_global_counters():
+    print(f"Total packets sent: {num_packets_sent}")
+    print(f"Total packets received: {num_packets_received}")
+    print(f"Total packets dropped: {num_packets_dropped}")
+    print(f"Number of times no satellite was in view to send: {no_sat_overhead_src_cnt}")
+    for r_sat in sat_object_list:
+        if r_sat.packets_sent_cnt > 0:
+            print(f"Satellite {r_sat.sat.model.satnum} packets sent: {r_sat.packets_sent_cnt}")
+    for r_sat in sat_object_list:
+        if r_sat.congestion_cnt > 0:
+            print(f"Satellite {r_sat.sat.model.satnum} congestion count: {r_sat.congestion_cnt}")
+
 def main ():
+    if do_multithreading:
+        print(f"Running with {num_threads} threads")
+    
     #time_scale = load.timescale()
     #tle_path = '/home/alexk1/Documents/satellite_data/starlink_9MAY23.txt'
     #tle_path = '/home/alexk1/Documents/satellite_data/STARLINK-1071.txt'
@@ -2055,26 +2248,14 @@ def main ():
 
     # ---------- ROUTING ------------   
 
-    blacksburg = wgs84.latlon(37.2296 * N, 80.4139 * W) #37.2296deg N, 80.4139deg W
-    london = wgs84.latlon(51.5072 * N, 0.1276 * W)
-    sydney = wgs84.latlon(33.8688 * S, 151.2093 * E) #33.8688deg S, 151.2093deg E
+    # build a schedule of packets to send
+    build_packet_schedule()
 
-    src = blacksburg
-    #dest = sydney
-    dest = london
-
-    print(f'Source position: {src}')
-    print(f'Destination position: {dest}')
-
-    global packet_schedule
-    packet_schedule[0] = [(blacksburg, london)]
+    # call routing algorithm to use to send packets
     distributed_link_state_routing()
-
-    packet_schedule[0] = [(blacksburg, london)]
-    directed_dijkstra_distance_routing()
-    
-    packet_schedule[0] = [(blacksburg, london)]
-    directed_dijkstra_hop_routing()
+    print_global_counters()
+    #directed_dijkstra_distance_routing()
+    #directed_dijkstra_hop_routing()
 
     exit ()
 

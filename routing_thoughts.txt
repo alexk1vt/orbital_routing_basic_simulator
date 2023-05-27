@@ -103,3 +103,6 @@ Scenarios:
 Ways I can impact scenarios:
 - satellites can be down
 - interfaces can be down (fore, aft, port, starboard)
+
+
+26MAY:  Look at line 2079 reg random global locations!
