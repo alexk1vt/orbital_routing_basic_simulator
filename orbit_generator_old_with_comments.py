@@ -27,10 +27,9 @@ do_multithreading = True
 num_threads = max(os.cpu_count()-2, 1) # 4
 
 # Global counters
-no_sat_overhead_cnt = 0
+no_sat_overhead_src_cnt = 0
+no_sat_overhead_dest_cnt = 0
 num_packets_dropped = 0
-num_max_hop_packets_dropped = 0 # this is a subset of num_packets_dropped
-num_route_calc_failures = 0
 num_packets_sent = 0
 num_packets_received = 0
 
@@ -79,7 +78,6 @@ neigh_recent_down_time_window = time_interval * 2 # a neighbor has been down rec
 interface_dir_correct = 1
 interface_dir_lateral_plus = 2
 interface_dir_lateral = 4
-interface_dir_lateral_minus = 5
 interface_dir_incorrect = 7
 interface_bandwidth_high = 1
 interface_bandwidth_middle = 2
@@ -127,7 +125,6 @@ class RoutingSat:
         sent_packet = False
 
         global num_packets_dropped
-        global num_max_hop_packets_dropped
         for packet in self.packet_qu:
             if self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval:
                 self.update_neigh_state(congestion = True) # tell neighbors of congestion on-demand (this will be cleared next time interval if packet count is low enough)
@@ -147,7 +144,6 @@ class RoutingSat:
                 self.packets_sent_cnt += 1
             elif len(packet['prev_hop_list']) > distributed_max_hop_count:
                 print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet to destination {packet['dest_gs']} exceeded max hop count.  Dropping packet.")
-                num_max_hop_packets_dropped += 1
                 num_packets_dropped += 1
                 if plot_dropped_packets:
                     draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"distributed link-state dropped packet - {len(packet['prev_hop_list'])} hops", draw_lines = True, draw_sphere = True)
@@ -230,7 +226,14 @@ class RoutingSat:
                     self.packet_qu.remove(packet)
         if sent_packet:
             return 0
-
+    """
+    def directed_routing_xmt_cycle(self):
+        for packet in self.xmt_qu:
+            target_satnum = packet[1][-1] #read top of next hop list
+            print(f"::directed_routing_xmit_cycle():: Sat {self.sat.model.satnum}: target_satnum: {target_satnum}, packet: {packet}")
+            add_to_rcv_qu_by_satnum(target_satnum, packet)
+            self.xmt_qu.remove(packet)
+    """
     def get_curr_geocentric(self):
         return self.sat.at(cur_time)
 
@@ -436,10 +439,20 @@ class RoutingSat:
         return sat_object_list[target_satnum]
 
     def get_fore_sat(self):
-        return sat_object_list[self.fore_sat_satnum] # fore satellite never changes
+        return sat_object_list[self.fore_sat_satnum]
+        #target_satnum = self.satnum + 1
+        #target_orbit_number = floor(target_satnum / sats_per_orbit)
+        #if target_orbit_number != self.orbit_number:
+        #    target_satnum = (self.orbit_number * sats_per_orbit) + (target_satnum % sats_per_orbit)
+        #return sat_object_list[target_satnum]
     
     def get_aft_sat(self):
-        return sat_object_list[self.aft_sat_satnum] # aft satellite never changes
+        return sat_object_list[self.aft_sat_satnum]
+        #target_satnum = self.satnum - 1
+        #target_orbit_number = floor(target_satnum / sats_per_orbit)
+        #if target_orbit_number != self.orbit_number:
+        #    target_satnum = (self.orbit_number * sats_per_orbit) + (target_satnum % sats_per_orbit)
+        #return sat_object_list[target_satnum]
 
     def get_sat_South(self):
         first_target_satnum = self.satnum - 1
@@ -549,22 +562,12 @@ class RoutingSat:
             print(f"Neighbor sat interface: {neigh_sat_interface} not recognized, aborting")
             exit()
         # calculate distance metric for neighbor satellite bearing
-        interface_correct_lower_range = (neigh_sat_interface_bearing - (interface_correct_range/2) + 360) % 360
-        interface_correct_upper_range = (neigh_sat_interface_bearing + (interface_correct_range/2) + 360) % 360
-        interface_lateral_plus_lower_range = (neigh_sat_interface_bearing - (interface_lateral_range/4) + 360) % 360
-        interface_lateral_plus_upper_range = (neigh_sat_interface_bearing + (interface_lateral_range/4) + 360) % 360
-        interface_lateral_lower_range = (neigh_sat_interface_bearing - (interface_lateral_range/2) + 360) % 360
-        interface_lateral_upper_range = (neigh_sat_interface_bearing + (interface_lateral_range/2) + 360) % 360
-        interface_lateral_minus_lower_range = (neigh_sat_interface_bearing - (interface_lateral_range/1.5) + 360) % 360
-        interface_lateral_minus_upper_range = (neigh_sat_interface_bearing + (interface_lateral_range/1.5) + 360) % 360
-        if (dest_bearing - interface_correct_lower_range) %360 <= (interface_correct_upper_range - interface_correct_lower_range) % 360:
-            bearing_metric = interface_dir_correct
-        elif (dest_bearing - interface_lateral_plus_lower_range) %360 <= (interface_lateral_plus_upper_range - interface_lateral_plus_lower_range) % 360:
+        if (neigh_sat_interface_bearing - (interface_correct_range/2) < dest_bearing) and (dest_bearing < neigh_sat_interface_bearing + (interface_correct_range/2)):
+            bearing_metric = interface_dir_correct 
+        elif (neigh_sat_interface_bearing - (interface_lateral_range /4) < dest_bearing) and (dest_bearing < neigh_sat_interface_bearing + (interface_lateral_range /4)):
             bearing_metric = interface_dir_lateral_plus
-        elif (dest_bearing - interface_lateral_lower_range) %360 <= (interface_lateral_upper_range - interface_lateral_lower_range) % 360:
+        elif (neigh_sat_interface_bearing - (interface_lateral_range /2) < dest_bearing) and (dest_bearing < neigh_sat_interface_bearing + (interface_lateral_range /2)):
             bearing_metric = interface_dir_lateral
-        elif (dest_bearing - interface_lateral_minus_lower_range) %360 <= (interface_lateral_minus_upper_range - interface_lateral_minus_lower_range) % 360:
-            bearing_metric = interface_dir_lateral_minus
         else:
             bearing_metric = interface_dir_incorrect
         
@@ -790,6 +793,12 @@ def all_sats_update_neigh_state():
                         r_sat.neigh_state_dict[satnum]['connection_last_down'] = cur_time
         print("\n")
 
+"""
+def add_to_rcv_qu_by_satnum(target_satnum, packet):
+    target_routing_sat = sat_object_list[target_satnum]
+    print(f"add_to_rcv_qu_by_satnum: target_satnum: {target_satnum}, packet: {packet}")
+    target_routing_sat.rcv_qu.insert(0, packet)
+"""
 def add_to_packet_qu_by_satnum(target_satnum, packet):
     target_routing_sat = sat_object_list[target_satnum]
     if len(target_routing_sat.packet_qu) > packet_backlog_size:
@@ -1007,7 +1016,276 @@ def draw_static_plot(satnum_list, terminal_list = [], title='figure', draw_lines
     
     plt.show()
 
+def test_NSEW(orbit_list):
+        # :: Testing N/S/E/W ::
 
+        h_range = range(0, 24)
+        t_span = time_scale.utc(2023, 5, 9, h_range)
+
+        test_orbit_b_index = random.randint(0, len(orbit_list)-1)
+        test_orbit_a_index = (test_orbit_b_index - 1) % len(orbit_list)
+        test_orbit_c_index = (test_orbit_b_index + 1) % len(orbit_list)
+
+        test_orbit_a = orbit_list[test_orbit_a_index]
+        test_orbit_b = orbit_list[test_orbit_b_index]
+        test_orbit_c = orbit_list[test_orbit_c_index]
+
+        test_sat_2_index = random.randint(0, len(test_orbit_a)-1)
+        test_sat_1_index = (test_sat_2_index - 1) % len(test_orbit_a)
+        test_sat_3_index = (test_sat_2_index + 1) % len(test_orbit_a)
+
+        test_sat_a1 = test_orbit_a[test_sat_1_index]
+        test_sat_a2 = test_orbit_a[test_sat_2_index]
+        test_sat_a3 = test_orbit_a[test_sat_3_index]
+
+        test_sat_b1 = test_orbit_b[test_sat_1_index]
+        test_sat_b2 = test_orbit_b[test_sat_2_index]
+        test_sat_b3 = test_orbit_b[test_sat_3_index]
+
+        test_sat_c1 = test_orbit_c[test_sat_1_index]
+        test_sat_c2 = test_orbit_c[test_sat_2_index]
+        test_sat_c3 = test_orbit_c[test_sat_3_index]
+
+        for t_i in t_span:
+            print(t_i.utc_jpl())
+            geocentric_a1 = test_sat_a1.at(t_i)
+            geocentric_a2 = test_sat_a2.at(t_i)
+            geocentric_a3 = test_sat_a3.at(t_i)
+
+            a1_lat, a1_lon = wgs84.latlon_of(geocentric_a1)
+            a2_lat, a2_lon = wgs84.latlon_of(geocentric_a2)
+            a3_lat, a3_lon = wgs84.latlon_of(geocentric_a3)
+            print(f"Type of lat: {type(a3_lat)}")
+            print(f"Compare test: {a3_lat.degrees < a2_lat.degrees}")
+            print(f"Sat_a1 lat: {a1_lat}, long: {a1_lon}")
+            print(f"Sat_a2 lat: {a2_lat}, long: {a2_lon}")
+            print(f"Sat_a3 lat: {a3_lat}, long: {a3_lon}")
+            print("\n")
+            print(f"Sat_a1 is North of Sat_a3: {sat_is_North_of (geocentric_a1, geocentric_a3)}")
+            print(f"Sat_a1 is East of Sat_a3: {sat_is_East_of (geocentric_a1, geocentric_a3)}")
+            print("\n")
+
+            """
+            pos_a1 = geocentric_a1.position.km
+            pos_a2 = geocentric_a2.position.km
+            pos_a3 = geocentric_a3.position.km
+            print(f"Sat_a1 position: {pos_a1}")
+            print(f"Sat_a2 position: {pos_a2}")
+            print(f"Sat_a3 position: {pos_a3}")
+            print("\n")
+            """
+            
+            geocentric_b1 = test_sat_b1.at(t_i)
+            #geocentric_b2 = test_sat_b2.at(t_i)
+            #geocentric_b3 = test_sat_b3.at(t_i)
+
+            pos_b1 = geocentric_b1.position.km
+            #pos_b2 = geocentric_b2.position.km
+            #pos_b3 = geocentric_b3.position.km
+
+            geocentric_c1 = test_sat_c1.at(t_i)
+            #geocentric_c2 = test_sat_c2.at(t_i)
+            #geocentric_c3 = test_sat_c3.at(t_i)
+
+            b1_lat, b1_lon = wgs84.latlon_of(geocentric_b1)
+            c1_lat, c1_lon = wgs84.latlon_of(geocentric_c1)
+            print(f"Sat_a1 lat: {a1_lat}, long: {a1_lon}")
+            print(f"Sat_b1 lat: {b1_lat}, long: {b1_lon}")
+            print(f"Sat_c1 lat: {c1_lat}, long: {c1_lon}")
+            print("\n")
+            print(f"Sat_a1 is North of Sat_c1: {sat_is_North_of (geocentric_a1, geocentric_c1)}")
+            print(f"Sat_a1 is East of Sat_c1: {sat_is_East_of (geocentric_a1, geocentric_c1)}")
+            print("\n")
+
+            """
+            pos_c1 = geocentric_c1.position.km
+            pos_c2 = geocentric_c2.position.km
+            pos_c3 = geocentric_c3.position.km
+            print(f"Sat_a1 position: {pos_a1}")
+            print(f"Sat_b1 position: {pos_b1}")
+            print(f"Sat_c1 position: {pos_c1}")
+            print("\n")
+            """
+
+def test_sat_distances(orbit_list):
+        
+        # :: Testing Satellite Distances ::
+        t = time_scale.utc(2023, 5, 9, 14)
+        i = 0
+        test_orbit_index = random.randint(0, len(orbit_list)-1)
+        test_orbit = orbit_list[test_orbit_index]
+        test_sat_index = random.randint(0, len(test_orbit)-1)
+        test_sat = test_orbit[test_sat_index]
+        print(f"Testing satellite satnum: {test_sat.model.satnum} in orbit {test_orbit_index}")
+        closest_sat_list = test_orbit[:test_sat_index] + test_orbit[test_sat_index+1:]  # make a satellite list that doesn't contain the test sat
+        closest_sat = find_closest_satellite(test_sat, closest_sat_list, t)
+
+        closest_sat_list.remove(closest_sat)
+        next_closest_sat = find_closest_satellite(test_sat, closest_sat_list, t)
+        print(f"Satellites closest to satellite: {test_sat.model.satnum} are {closest_sat.model.satnum} and {next_closest_sat.model.satnum}")
+
+        sat1 = test_sat 
+        sat2 = closest_sat
+        sat3 = next_closest_sat
+        
+        t_range = range(0,20)
+        t_span = ts.utc(2023, 5, 9, t_range) # calculate max/min distance over time interval
+        print(f"Calculating distance between satellites {sat1.model.satnum} and {sat2.model.satnum} in this orbit over {len(t_range)} hour interval")
+        dist_list = []
+        for t_i in t_span:
+            dist_diff = (sat1.at(t_i) - sat2.at(t_i)).distance().km
+            dist_list.append(int(abs(dist_diff)))
+
+        print(f'\tMinimum distance: {min(dist_list)}km')
+        print(f'\tMaximum distance: {max(dist_list)}km')
+        print(f'\tAmount of distance change: {max(dist_list)-min(dist_list)}km')
+
+        print(f"Calculating distance between satellites {sat1.model.satnum} and {sat3.model.satnum} in this orbit over {len(t_range)} hour interval")
+        dist_list = []
+        for t_i in t_span:
+            dist_diff = (sat1.at(t_i) - sat3.at(t_i)).distance().km
+            dist_list.append(int(abs(dist_diff)))
+
+        print(f'\tMinimum distance: {min(dist_list)}km')
+        print(f'\tMaximum distance: {max(dist_list)}km')
+        print(f'\tAmount of distance change: {max(dist_list)-min(dist_list)}km')
+
+        print(f"\nChecking height variability of satellite {test_sat.model.satnum} over same time span")
+        min_height = min(get_satellite_height(test_sat, t_i) for t_i in t_span)
+        max_height = max(get_satellite_height(test_sat, t_i) for t_i in t_span)
+        height_diff = int(max_height - min_height)
+        print(f'\tHeight difference for satellite {test_sat.model.satnum} over {len(t_range)} hours: {height_diff}km')
+
+def static_draw_orig():
+    # Original version based on: https://stackoverflow.com/questions/51891538/create-a-surface-plot-of-xyz-altitude-data-in-python
+    # Number of orbits to draw
+    max_num_orbits_to_draw = 12
+
+    # time interval covered
+    m_range = range(0, 60)
+    h_range = range(0, 24)
+    t_span = []
+    for h in h_range:
+        for m in m_range:
+            t_span.append(time_scale.utc(2023, 5, 9, h, m))
+    #t_span = ts.utc(2023, 5, 9, h_range)
+
+    # calculating which orbits to draw
+    orbit_index_list = []
+    """
+    # if spacing orbits out equally
+    draw_orbit_index = int(orbit_cnt/max_num_orbits_to_draw)
+    for orbit_index in range(len(orbit_list)):
+        if (orbit_index%draw_orbit_index == 0):
+        orbit_index_list.append(orbit_index) 
+    """
+    # if drawing sequential orbits
+    for orbit_index in range((min(max_num_orbits_to_draw, len(orbit_list)))):
+        orbit_index_list.append(orbit_index)
+
+    # ::: STATIC COLORED ORBITS :::
+    # Original version based on: https://stackoverflow.com/questions/51891538/create-a-surface-plot-of-xyz-altitude-data-in-python
+    if draw_static_orbits:
+        color_array = []
+        colors = ['red', 'purple', 'blue', 'orange', 'green', 'yellow', 'olive', 'cyan', 'brown']
+        x_array = []
+        y_array = []
+        z_array = []
+        t = t_span[0]
+        
+        for orbit_index in orbit_index_list:
+                orbit = orbit_list[orbit_index]
+                for s in orbit:
+                    geocentric = s.at(t)
+                    x, y, z = geocentric.position.km
+                    x_array.append(x)
+                    y_array.append(y)
+                    z_array.append(z)
+                    orbit_color = colors[orbit_index%len(colors)]
+                    color_array.append(orbit_color)
+        fig = plt.figure()
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(x_array, y_array, z_array, c=color_array)
+        plt.show()
+
+def draw_distributed_orig():
+    # Number of orbits to draw
+    max_num_orbits_to_draw = 12
+
+    # time interval covered
+    m_range = range(0, 60)
+    h_range = range(0, 24)
+    t_span = []
+    for h in h_range:
+        for m in m_range:
+            t_span.append(time_scale.utc(2023, 5, 9, h, m))
+    #t_span = ts.utc(2023, 5, 9, h_range)
+
+    # calculating which orbits to draw
+    orbit_index_list = []
+    """
+    # if spacing orbits out equally
+    draw_orbit_index = int(orbit_cnt/max_num_orbits_to_draw)
+    for orbit_index in range(len(orbit_list)):
+        if (orbit_index%draw_orbit_index == 0):
+        orbit_index_list.append(orbit_index) 
+    """
+    # if drawing sequential orbits
+    for orbit_index in range((min(max_num_orbits_to_draw, len(orbit_list)))):
+        orbit_index_list.append(orbit_index)
+    # ::: ANIMATED ORBITS :::
+    # Updating plot over time:  https://www.geeksforgeeks.org/how-to-update-a-plot-on-same-figure-during-the-loop/
+    plt.ion() # used to run GUI event loop
+    
+    fig = plt.figure()
+    ax = fig.add_subplot(111, projection='3d')
+
+    empty_array = []
+    #sp = ax.scatter(X, Y, Z, c=color_array)
+    #sp = ax.scatter(empty_array, empty_array, empty_array, c='red')
+    ax_min = -6000
+    ax_max = 6000
+
+    ax.set_xlim3d(ax_min, ax_max)
+    ax.set_ylim3d(ax_min, ax_max)
+    ax.set_zlim3d(ax_min, ax_max)
+
+    # assuming equal number of satellites in each orbit
+    colors = ['red', 'blue', 'green', 'yellow', 'orange', 'purple', 'olive', 'cyan', 'brown']
+    color_array = []
+    #for orbit_index in range(len(orbit_list[0])):
+    #    orbit_color = colors[orbit_index%len(colors)]
+    #    color_array.append(orbit_color)
+
+
+    #sp = ax.scatter(empty_array, empty_array, empty_array, c=color_array)
+    sp = ax.scatter(empty_array, empty_array, empty_array)
+    fig.show()
+
+    for t_i in t_span:  # t_span defined at start of plotting section
+        x_array = []
+        y_array = []
+        z_array = []
+        for orbit_index in orbit_index_list:
+            orbit = orbit_list[orbit_index]
+            for s in orbit:
+                geocentric = s.at(t_i)
+                x, y, z = geocentric.position.km
+                x_array.append(x)
+                y_array.append(y)
+                z_array.append(z)
+                #orbit_color = colors[orbit_index%len(colors)]
+                #color_array.append(orbit_color)
+
+        X = np.array(x_array)
+        Y = np.array(y_array)
+        Z = np.array(z_array)
+        sp._offsets3d = (X, Y, Z)
+        #sp.set_segments(X, Y, Z)
+        #sp.set(color=color_array)
+        plt.draw()
+        plt.pause(.1)
+    plt.waitforbuttonpress()
 
 def plot_NSEW():
         random_satnum = random.randint(0, (orbit_cnt * sats_per_orbit)-1)
@@ -1235,8 +1513,6 @@ def find_route_random(src, dest):
     draw_static_plot(sat_traverse_list, [src, dest], title=f'Random: {len(sat_traverse_list)} satellite hops; distance {int(link_distance)}km')
 
 def find_route_dijkstra_dist(src, dest):
-    global no_sat_overhead_cnt
-    global num_route_calc_failures
     print("Starting Dijkstra distance routing")
     # Find satellite at least 60 deg above the horizon at source and destination
     # FIX: distances must also include the satnum of which sat put the lowest distance!  Must follow that listing backwards to id path to the source
@@ -1251,7 +1527,6 @@ def find_route_dijkstra_dist(src, dest):
             break # Just go with first satellite
     if not sat_found:
         print(f"Unable to find satellite over source!")
-        no_sat_overhead_cnt += 1
         return -1
     src_routing_sat = r_sat
 
@@ -1266,7 +1541,6 @@ def find_route_dijkstra_dist(src, dest):
             break # Just go with first satellite
     if not sat_found:
         print(f"Unable to find satellite over destination!")
-        no_sat_overhead_cnt += 1
         return -1
     dest_routing_sat = r_sat
 
@@ -1282,7 +1556,7 @@ def find_route_dijkstra_dist(src, dest):
     cur_sat_dist = 0
     route_found = False
 
-    #start = time.process_time()
+    start = time.process_time()
     loop_cnt = 0
 
     print("Starting Dijsktra Loop")
@@ -1315,7 +1589,7 @@ def find_route_dijkstra_dist(src, dest):
         
         # Test to see if we just set the destination node as 'visited'
         if cur_sat.sat.model.satnum == dest_routing_sat.sat.model.satnum:
-            #print("Algorithm reached destination node")
+            print("Algorithm reached destination node")
             route_found = True  # Indicate the destination has been reached and break out of the loop
             break
 
@@ -1335,8 +1609,7 @@ def find_route_dijkstra_dist(src, dest):
         # Were there no nodes with distances other than infinity?  Something went wrong
         if next_hop_dist == float('inf'):
             print(f"No more neighbors without infinite distances to explore.  {len(visited_sat_dict)} visited nodes; {len(unvisted_sat_dict)} unvisted nodes remaining")
-            num_route_calc_failures += 1
-            return -1
+            break
 
         # Get sat routing object for indicated satnum
         cur_sat = get_routing_sat_obj_by_satnum(next_hop_satnum)
@@ -1349,8 +1622,7 @@ def find_route_dijkstra_dist(src, dest):
     # Done with loop; check if a route was found
     if not route_found:
         print(f"Unable to find route using dijkstra's algorithm")
-        num_route_calc_failures += 1
-        return -1
+        return
     
     # Route was found, so retrace steps
     traverse_list = [dest_routing_sat.sat.model.satnum]
@@ -1358,21 +1630,17 @@ def find_route_dijkstra_dist(src, dest):
     link_distance = 0
     while True:
         next_hop = visited_sat_dict[cur_satnum][1]
-        if next_hop == None:
-            print(f"::find_route_dijkstra_dist():: ERROR - next_hop in visted_sat_dict is None; cur_satnum: {cur_satnum} / visited_sat_dict: {visited_sat_dict}")
-            num_route_calc_failures += 1
-            return -1
         link_distance += get_sat_distance(get_routing_sat_obj_by_satnum(cur_satnum).sat.at(cur_time), get_routing_sat_obj_by_satnum(next_hop).sat.at(cur_time))
         traverse_list.insert(0, next_hop)
         if next_hop == src_routing_sat.sat.model.satnum:
             break
         cur_satnum = next_hop
 
-    #compute_time = time.process_time() - start
-    #print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
-    #print(f"Transit list:\n{traverse_list}")
+    compute_time = time.process_time() - start
+    print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
+    print(f"Transit list:\n{traverse_list}")
     traverse_list.reverse()
-    #draw_static_plot(traverse_list, [dest, src], title=f'Planned Dijkstra Distance: {len(traverse_list)} hops, {int(link_distance)}km distance', draw_lines = True, draw_sphere = True)
+    draw_static_plot(traverse_list, [dest, src], title=f'Planned Dijkstra Distance: {len(traverse_list)} hops, {int(link_distance)}km distance', draw_lines = True, draw_sphere = True)
     # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
     packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest}
     send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
@@ -1386,12 +1654,12 @@ def find_route_dijkstra_hop(src, dest):
         if (r_sat.is_overhead_of(src)):
             topo_position = (r_sat.sat - src).at(cur_time)
             alt, az, dist = topo_position.altaz()    
-            #print(f'Satellite {r_sat.sat.model.satnum} is at least {req_elev}deg off horizon at source')
-            #print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
+            print(f'Satellite {r_sat.sat.model.satnum} is at least {req_elev}deg off horizon at source')
+            print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
             break # Just go with first satellite
     if not sat_found:
-        #print(f"Unable to find satellite over source!")
+        print(f"Unable to find satellite over source!")
         return -1
     src_routing_sat = r_sat
 
@@ -1400,12 +1668,12 @@ def find_route_dijkstra_hop(src, dest):
         if (r_sat.is_overhead_of(dest)):
             topo_position = (r_sat.sat - dest).at(cur_time)
             alt, az, dist = topo_position.altaz()    
-            #print(f'Satellite {r_sat.sat.model.satnum} is at least {req_elev}deg off horizon at destination')
-            #print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
+            print(f'Satellite {r_sat.sat.model.satnum} is at least {req_elev}deg off horizon at destination')
+            print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
             break # Just go with first satellite
     if not sat_found:
-        #print(f"Unable to find satellite over destination!")
+        print(f"Unable to find satellite over destination!")
         return -1
     dest_routing_sat = r_sat
 
@@ -1421,7 +1689,7 @@ def find_route_dijkstra_hop(src, dest):
     cur_sat_dist = 0
     route_found = False
 
-    #start = time.process_time()
+    start = time.process_time()
     loop_cnt = 0
 
     print("Starting Dijsktra Loop")
@@ -1455,7 +1723,7 @@ def find_route_dijkstra_hop(src, dest):
         
         # Test to see if we just set the destination node as 'visited'
         if cur_sat.sat.model.satnum == dest_routing_sat.sat.model.satnum:
-            #print("Algorithm reached destination node")
+            print("Algorithm reached destination node")
             route_found = True  # Indicate the destination has been reached and break out of the loop
             break
 
@@ -1475,7 +1743,7 @@ def find_route_dijkstra_hop(src, dest):
         # Were there no nodes with distances other than infinity?  Something went wrong
         if next_hop_dist == float('inf'):
             print(f"No more neighbors without infinite distances to explore.  {len(visited_sat_dict)} visited nodes; {len(unvisted_sat_dict)} unvisted nodes remaining")
-            return -1 
+            break
 
         # Get sat routing object for indicated satnum
         cur_sat = get_routing_sat_obj_by_satnum(next_hop_satnum)
@@ -1488,7 +1756,7 @@ def find_route_dijkstra_hop(src, dest):
     # Done with loop; check if a route was found
     if not route_found:
         print(f"Unable to find route using dijkstra's algorithm")
-        return -1
+        return
     
     # Route was found, so retrace steps
     traverse_list = [dest_routing_sat.sat.model.satnum]
@@ -1502,38 +1770,41 @@ def find_route_dijkstra_hop(src, dest):
             break
         cur_satnum = next_hop
 
-    #compute_time = time.process_time() - start
-    #print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
-    #print(f"Transit list:\n{traverse_list}")
+    compute_time = time.process_time() - start
+    print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
+    print(f"Transit list:\n{traverse_list}")
     traverse_list.reverse()
-    #draw_static_plot(traverse_list, [dest, src], title=f'Planned Dijkstra Hop: {len(traverse_list)} hops, {int(link_distance)}km distance', draw_lines = True, draw_sphere = True)
+    draw_static_plot(traverse_list, [dest, src], title=f'Planned Dijkstra Hop: {len(traverse_list)} hops, {int(link_distance)}km distance', draw_lines = True, draw_sphere = True)
     # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
     packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest}
     send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
 
 # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
 def send_directed_routing_packet_from_source(starting_satnum, starting_terminal, packet):  # must have next_hop_list pre_built
-    global no_sat_overhead_cnt
-    #print(f"::send_directed_routing_packet_from_source():: starting_satnum: {starting_satnum}, starting_terminal: {starting_terminal}, packet: {packet}")
+    print(f"::send_directed_routing_packet_from_source():: starting_satnum: {starting_satnum}, starting_terminal: {starting_terminal}, packet: {packet}")
     starting_sat = get_routing_sat_obj_by_satnum(starting_satnum)
 
     topo_position = (starting_sat.sat - starting_terminal).at(cur_time)
-    _, _, dist = topo_position.altaz()
+    alt, _, dist = topo_position.altaz()
     if not starting_sat.is_overhead_of(starting_terminal):
-        print(f"Satellite {starting_satnum} is not overhead starting terminal _after routing_ - starting terminal: {starting_terminal}")
-        no_sat_overhead_cnt += 1
+        print(f"Satellite {starting_satnum} is not overhead starting terminal {starting_terminal}")
+        return
+    if alt.degrees < req_elev:
+        print(f"Satellite {starting_satnum} is not {req_elev}deg over head starting terminal {starting_terminal}")
         return
     packet['distance_traveled'] += dist.km
     add_to_packet_qu_by_satnum(starting_satnum, packet)
     
 def send_distributed_routing_packet_from_source(src, dest):
-    global num_packets_dropped
     sat_overhead = False
     for routing_sat in sat_object_list:
         if routing_sat.is_overhead_of(src):
             sat_overhead = True
             break
     if not sat_overhead:
+        print(f"No satellite overhead starting terminal {src}", end='\r')
+        global no_sat_overhead_src_cnt
+        no_sat_overhead_src_cnt += 1
         return -1
     distance = get_sat_distance(src.at(cur_time), routing_sat.sat.at(cur_time))
     # ::: distributed routing packet structure: [[prev_hop_list], distance_traveled, dest_gs] - packet is at destination when satellite is above dest_gs
@@ -1543,31 +1814,57 @@ def send_distributed_routing_packet_from_source(src, dest):
 
 def build_constellation(source_sat):
 
+    # load tle into pandas data_frame to pull data
+    #col_headers = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+    #data_frame = pd.read_csv(tle_path, header=None, delim_whitespace=True, names=col_headers, engine='python')
+   
+    #print(data_frame)
+
+    #data_frame_index = 0 # we're only reading in a single TLE
+    #Name = data_frame.iloc[data_frame_index,0]
+    #Inclination = float(data_frame.iloc[data_frame_index+2,2])
+    #RaaN = data_frame.iloc[data_frame_index+2,3]
+    #Ecc = data_frame.iloc[data_frame_index+2,4]
+    #Arg_Perig = float(data_frame.iloc[data_frame_index+2,5])
     Epoch =   source_sat.epoch # Maybe just copy the epoch from the loaded TLE?
+    #Drag_coef = data_frame.iloc[data_frame_index+1,6]
+    #Mean_motion = data_frame.iloc[data_frame_index+2,7]
+    #Starting_mean_anomoly = float(data_frame.iloc[data_frame_index+2,6])
 
     # Correct values and convert to radians where needed
+
     # Epoch - convert to number of days since 1949 December 31 00:00 UT
     Corr_Epoch = correct_Epoch_days(Epoch.utc_datetime().date()) + (source_sat.model.epochdays % 1) #getting the partial days of the epoch
     
     # Drag Coefficient, aka BSTAR  http://www.castor2.ca/03_Mechanics/03_TLE/B_Star.html
+    #Corr_drag_coef = correct_BSTAR_float(Drag_coef)
     Corr_drag_coef = source_sat.model.bstar
 
     # Eccentricity
+    #Corr_Ecc = Ecc * (1/pow(10, 7))
     Corr_Ecc = source_sat.model.ecco
 
     # Argument of Perigee - convert from degrees to radians
+    #Rad_Arg_Perig = degrees_to_radians(Arg_Perig)
     Rad_Arg_Perig = source_sat.model.argpo
     
     # Inclination - convert from degrees to radians
+    #Rad_Inclination = degrees_to_radians(Inclination)
     Rad_Inclination = source_sat.model.inclo
 
     # Mean Motion - convert from revolutions/day to radians/minute
+    #_revs_per_minute = Mean_motion / 24 / 60
+    #Rad_Mean_motion = _revs_per_minute * 2 * 3.1416
     Rad_Mean_motion = source_sat.model.no_kozai
 
     # Mean anomoly - convert from degrees to radians
+    #Rad_Starting_mean_anomoly = degrees_to_radians(Starting_mean_anomoly)
+    #while (Rad_Starting_mean_anomoly > (2*3.1416)):
+    #    Rad_Starting_mean_anomoly -= (2*3.1416)
     Rad_Starting_mean_anomoly = source_sat.model.mo
     
     # Right Ascension of Ascending Node - convert from degrees to radians
+    #Rad_RaaN = degrees_to_radians(RaaN)
     Rad_Starting_RaaN = source_sat.model.nodeo
 
     # Mean anomoly Modifier
@@ -1579,6 +1876,18 @@ def build_constellation(source_sat):
     # ballistic coefficient (ndot) and mean motion 2nd derivative (nddot) - supposedely can just set to 0, but including for completeness
     Ndot = source_sat.model.ndot
     Nddot = source_sat.model.nddot
+
+    """
+    print(f'Using values:\n'
+          f'\tCorr_Epoch: {Corr_Epoch}\n'
+          f'\tCorr_drag_coef: {Corr_drag_coef}\n'
+          f'\tCorr_Ecc: {Corr_Ecc}\n'
+          f'\tRad_Arg_Perig: {Rad_Arg_Perig}\n'
+          f'\tRad_Inclination: {Rad_Inclination}\n'
+          f'\tMean_anomoly: {Rad_Starting_mean_anomoly + (1 * MaM)} (Rad_Starting_mean_anomoly + (sat_index[1] * MaM))\n'
+          f'\tRad_Mean_motion: {Rad_Mean_motion}\n'
+          f'\Rad_Starting_RaaN: {Rad_Starting_RaaN}\n\n')
+    """
 
     #building satellites using instructions from https://rhodesmill.org/skyfield/earth-satellites.html
     
@@ -1634,20 +1943,18 @@ def plot_objects_to_sphere(object_list):
     plt.show()
 
 def directed_dijkstra_hop_routing():
-    global no_sat_overhead_cnt
-    global num_packets_dropped
-    global num_packets_sent
-
-    max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
+    max_time_inverals = 50
     for time_interval in range(max_time_inverals):
         if time_interval in packet_schedule:
             packet_send_list = packet_schedule[time_interval]
             for packet in packet_send_list:
                 src, dest = packet
-                if find_route_dijkstra_hop(src, dest) == -1:
-                    print("Unable to find route to {src}", end="\r")
-                    num_packets_dropped += 1
-                num_packets_sent += 1
+                send_status = find_route_dijkstra_hop(src, dest)
+                if send_status == -1:
+                    if time_interval + 1 not in packet_schedule:
+                        packet_schedule[time_interval + 1] = [(src, dest)]
+                    else:
+                        packet_schedule[time_interval + 1].append((src, dest))
             del packet_schedule[time_interval]
         # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
         packets_sent = True
@@ -1664,20 +1971,18 @@ def directed_dijkstra_hop_routing():
         print(packet_schedule)
 
 def directed_dijkstra_distance_routing():
-    global no_sat_overhead_cnt
-    global num_packets_dropped
-    global num_packets_sent
-
-    max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
+    max_time_inverals = 50
     for time_interval in range(max_time_inverals):
         if time_interval in packet_schedule:
             packet_send_list = packet_schedule[time_interval]
             for packet in packet_send_list:
                 src, dest = packet
-                if find_route_dijkstra_dist(src, dest) == -1:
-                    print(f"Unable to find route to {src}", end='\r')                
-                    num_packets_dropped += 1
-                num_packets_sent += 1
+                send_status = find_route_dijkstra_dist(src, dest)
+                if send_status == -1:
+                    if time_interval + 1 not in packet_schedule:
+                        packet_schedule[time_interval + 1] = [(src, dest)]
+                    else:
+                        packet_schedule[time_interval + 1].append((src, dest))
             del packet_schedule[time_interval]
         # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
         packets_sent = True
@@ -1686,19 +1991,39 @@ def directed_dijkstra_distance_routing():
             for routing_sat in sat_object_list:
                 if routing_sat.directed_routing_process_packet_queue() == 0:
                     packets_sent = True
-        if (len(packet_schedule) == 0) and (num_packets_received + num_packets_dropped == num_packets_sent):
-            print("All packets sent and accounted for.  Terminating simulation")
+        if len(packet_schedule) == 0:
+            print("No more packets to send in schedule")
             break
     if len(packet_schedule) > 0:
         print("Failed to send all packets in schedule")
         print(packet_schedule)
-    if not (num_packets_received + num_packets_dropped == num_packets_sent):
-        print("Some packets unaccounted for!!")
+
+    """
+    satnum_closest_to_src = find_closest_satnum_to_terminal(src)
+    satnum_closest_to_src_orbit = floor(satnum_closest_to_src / sats_per_orbit)
+    satnum_closest_to_src_orbit_neigh1 = (satnum_closest_to_src_orbit - 1) % orbit_cnt
+    satnum_closest_to_src_orbit_neigh2 = (satnum_closest_to_src_orbit + 1) % orbit_cnt
+    print(f"Satnum closest to src: {satnum_closest_to_src}")
+    print(f"Orbits closest to src: {satnum_closest_to_src_orbit}, {satnum_closest_to_src_orbit_neigh1}, {satnum_closest_to_src_orbit_neigh2}")
+    satnum_closest_to_dest = find_closest_satnum_to_terminal(dest)
+    satnum_closest_to_dest_orbit = floor(satnum_closest_to_dest / sats_per_orbit)
+    satnum_closest_to_dest_orbit_neigh1 = (satnum_closest_to_dest_orbit - 1) % orbit_cnt
+    satnum_closest_to_dest_orbit_neigh2 = (satnum_closest_to_dest_orbit + 1) % orbit_cnt
+    print(f"Satnum closest to dest: {satnum_closest_to_dest}")
+    print(f"Orbits closest to dest: {satnum_closest_to_dest_orbit}, {satnum_closest_to_dest_orbit_neigh1}, {satnum_closest_to_dest_orbit_neigh2}")
+    satnum_list = [*range(satnum_closest_to_src_orbit*sats_per_orbit, ((satnum_closest_to_src_orbit+1) * sats_per_orbit) - 1)]
+    satnum_list.extend([*range(satnum_closest_to_src_orbit_neigh1*sats_per_orbit, ((satnum_closest_to_src_orbit_neigh1+1)*sats_per_orbit) - 1)])
+    satnum_list.extend([*range(satnum_closest_to_src_orbit_neigh2*sats_per_orbit, ((satnum_closest_to_src_orbit_neigh2+1)*sats_per_orbit) - 1)])
+    satnum_list.extend([*range(satnum_closest_to_dest_orbit*sats_per_orbit, ((satnum_closest_to_dest_orbit+1)*sats_per_orbit) - 1)])
+    satnum_list.extend([*range(satnum_closest_to_dest_orbit_neigh1*sats_per_orbit, ((satnum_closest_to_dest_orbit_neigh1+1)*sats_per_orbit) - 1)])
+    satnum_list.extend([*range(satnum_closest_to_dest_orbit_neigh2*sats_per_orbit, ((satnum_closest_to_dest_orbit_neigh2+1)*sats_per_orbit) - 1)])
+    print(f"Number of sats (should be {sats_per_orbit * 6}: {len(satnum_list)}")
+    satnum_list = [*set(satnum_list)]
+    draw_static_plot(satnum_list, terminal_list = [src, dest], title='Overhead sats', draw_lines = True, draw_sphere = True)
+    """
+    
 
 def distributed_link_state_routing():
-    global no_sat_overhead_cnt
-    global num_packets_dropped
-    global num_packets_sent
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
     # Work through packet scheduler at each time interval and send all scheduled packets
     for time_interval in range(max_time_inverals):
@@ -1707,10 +2032,8 @@ def distributed_link_state_routing():
             packet_send_list = packet_schedule[time_interval]
             for packet in packet_send_list:
                 src, dest = packet
-                if send_distributed_routing_packet_from_source(src, dest) == -1:
-                    print(f"No satellite overhead starting terminal {src}", end='\r')                
-                    no_sat_overhead_cnt += 1
-                    num_packets_dropped += 1
+                send_distributed_routing_packet_from_source(src, dest)
+                global num_packets_sent
                 num_packets_sent += 1
             del packet_schedule[time_interval]
         print("Updating neighbor states")
@@ -1730,14 +2053,13 @@ def distributed_link_state_routing():
                     packets_sent = True
         compute_time = time.process_time() - start
         print(f"Time spent to send packets: {compute_time}")
-        if (len(packet_schedule) == 0) and (num_packets_received + num_packets_dropped == num_packets_sent):
-            print("All packets sent and accounted for.  Terminating simulation")
+        if len(packet_schedule) == 0:
+            print("No more packets to send in schedule")
             break
         increment_time()
     if len(packet_schedule) > 0:
-        print(f"Failed to send all packets in schedule.  {len(packet_schedule)} packets remaining in schedule")
-    if not (num_packets_received + num_packets_dropped == num_packets_sent):
-        print("Some packets unaccounted for!!")
+        print("Failed to send all packets in schedule")
+        print(packet_schedule)
         
 def build_disruption_schedule():
     # select satellites randomly and for random durations (short) to disrupt
@@ -1874,8 +2196,8 @@ def build_packet_schedule():
             else:
                 category = 4
             if category == 4:
-                index1 = random.randint(0, len(city_list) - 1)
-                index2 = random.randint(0, len(city_list) - 1)
+                index1 = random.random(0, len(city_list) - 1)
+                index2 = random.random(0, len(city_list) - 1)
                 city1 = city_list[index1]
                 city2 = city_list[index2]
                 packet_schedule[interval].append((city1, city2))
@@ -1889,62 +2211,275 @@ def build_packet_schedule():
                 else:
                     packet_schedule[interval].append((city2, city1))
 
+            #print(f"Packet schedule[{interval}]: Category: {category} {packet_schedule[interval][-1]}")
+    #input("Press enter to continue...")
 
+    """
+    blacksburg = wgs84.latlon(37.2296 * N, 80.4139 * W) #37.2296deg N, 80.4139deg W
+    london = wgs84.latlon(51.5072 * N, 0.1276 * W)
+    sydney = wgs84.latlon(33.8688 * S, 151.2093 * E) #33.8688deg S, 151.2093deg E
+
+    src = blacksburg
+    #dest = sydney
+    dest = london
+
+    print(f'Source position: {src}')
+    print(f'Destination position: {dest}')
+
+    global packet_schedule
+    packet_schedule[0] = [(blacksburg, london)]
+    """
 def print_global_counters():
-    print(f"::::: GLOBAL COUNTERS :::::")
     print(f"Total packets sent: {num_packets_sent}")
     print(f"Total packets received: {num_packets_received}")
     print(f"Total packets dropped: {num_packets_dropped}")
-    print(f"  Number of packets dropped due to exceeding max hops: {num_max_hop_packets_dropped}")
-    print(f"  Number of packets dropped due to no satellite overhead source: {no_sat_overhead_cnt}")
-    print(f"Number of route calculation failures: {num_route_calc_failures}") # this is essentially max_hop_packets_dropped for directed routing functions
+    print(f"Number of times no satellite was in view to send: {no_sat_overhead_src_cnt}")
     for r_sat in sat_object_list:
         if r_sat.congestion_cnt > 0:
             print(f"Satellite {r_sat.sat.model.satnum} congestion count: {r_sat.congestion_cnt}")
 
 def main ():
-    start_run_time = time.time()
     if do_multithreading:
         print(f"Running with {num_threads} threads")
     
-    # ---------- SETUP ------------
-    # Load TLEs
+    #time_scale = load.timescale()
+    #tle_path = '/home/alexk1/Documents/satellite_data/starlink_9MAY23.txt'
+    #tle_path = '/home/alexk1/Documents/satellite_data/STARLINK-1071.txt'
     tle_path = './STARLINK-1071.txt'
     #starlink_url = 'https://celestrak.org/NORAD/elements/gp.php?GROUP=starlink&FORMAT=tle'   
 
     satellites = load.tle_file(tle_path)
     print('Loaded', len(satellites), 'satellites')
     source_sat = satellites[0]
+
     print(f'Source satellite epoch: {source_sat.epoch.utc_jpl()}')
 
-    # Create a list of satellite objects
     build_constellation(source_sat)
-
-    # Initialize simulation start time
+        
+    """
+    print(f'\n~~~~~~~~~~ Comparing fake_sat 0 against source satellite ~~~~~~~~~~')
+    print(f'   fake_sat 0                           {source_sat.name}')
+    stdout.writelines(dump_satrec(orbit_list[0][0].model, source_sat.model))
+    print('\n')
+    """
     global cur_time
     global cur_time_next
     cur_time = time_scale.utc(2023, 5, 9, 0, 0, 0)
     cur_time_next = time_scale.utc(2023, 5, 9, 0, 0, 1)
     print(f"Set current time to: {cur_time.utc_jpl()}")
     
+    """
+    # :: Quick plot of three successive orbits to get a feel for layout ::
+    print(f'Orbit list has {len(orbit_list)} orbits')
+    target_orbit_num = 1
+    num_orbits_to_plot = 5
+    min_satnum = target_orbit_num * sats_per_orbit
+    max_satnum = min_satnum + (sats_per_orbit * num_orbits_to_plot)
+    satnum_plot_list = [*range(min_satnum, max_satnum)]
+    draw_static_plot(satnum_plot_list, f"{num_orbits_to_plot} orbits starting with Orbit {target_orbit_num}")
+
+    set_time_interval(600)
+    increment_time()
+    draw_static_plot(satnum_plot_list, f"{num_orbits_to_plot} orbits starting with Orbit {target_orbit_num}")
+    increment_time()
+    draw_static_plot(satnum_plot_list, f"{num_orbits_to_plot} orbits starting with Orbit {target_orbit_num}")
+    increment_time()
+    draw_static_plot(satnum_plot_list, f"{num_orbits_to_plot} orbits starting with Orbit {target_orbit_num}")
+
+    exit()
+    """
+
+    # ---------- TESTING ------------
+
+    # Build a list of satnums over a specific path to test
+    # Test paths:
+    #  Something that circles the globe
+    #test_circumnavigate()
+
+    #  Something that goes Up to the North, then over two orbits, then Down to the South
+    #test_North_South_path()
+    #exit ()
+
     # ---------- ROUTING ------------   
 
     # build a schedule of packets to send
     build_packet_schedule()
 
     # call routing algorithm to use to send packets
-    #distributed_link_state_routing()
-    directed_dijkstra_distance_routing()
+    distributed_link_state_routing()
+    print_global_counters()
+    #directed_dijkstra_distance_routing()
     #directed_dijkstra_hop_routing()
 
-    # ---------- RESULTS ------------
-    print_global_counters()
-
-    full_run_time = time.time() - start_run_time
-    print(f"Full run time: {full_run_time} seconds")
     exit ()
 
     
+    #print(f"Random sat position vector: {random_routing_sat.sat.at(cur_time).position.km}")
+    #sat_east_angle = get_vector_rad_angle(random_routing_sat.sat.at(cur_time).position.km, sat_east.sat.at(cur_time).position.km)
+    #print(f"Angle from selected sat and sat_is: {sat_east_angle} (in radians)")
+
+
+
+    """
+    #random_num = random.randint(0, (orbit_cnt * sats_per_orbit)-1)
+    random_num = 503
+    random_routing_sat = sat_object_list[random_num]
+
+    routing_sat_east = random_routing_sat.get_sat_East()
+    routing_sat_west = random_routing_sat.get_sat_West()
+    routing_sat_north = random_routing_sat.get_sat_North()
+    routing_sat_south = random_routing_sat.get_sat_South()
+
+    random_sat_satnum = random_routing_sat.sat.model.satnum
+    sat_north_satnum = routing_sat_north.sat.model.satnum
+    sat_south_satnum = routing_sat_south.sat.model.satnum
+    sat_east_satnum = routing_sat_east.sat.model.satnum
+    sat_west_satnum = routing_sat_west.sat.model.satnum
+
+
+    print(f"East_sat orbit number: {routing_sat_east.orbit_number}; Random sat's stated orbit number east: {random_routing_sat.succeeding_orbit_number}")
+    print(f"West_sat orbit number: {routing_sat_west.orbit_number}; Random sat's stated orbit number west: {random_routing_sat.preceeding_orbit_number}")
+
+    heading = get_heading_by_satnum_degrees(random_routing_sat.sat.model.satnum)
+    print(f"Selected sat: {random_routing_sat.sat.model.satnum} has heading of {heading}deg")
+    interval = 60 # in seconds
+    set_time_interval(interval) 
+    loop_cnt = 90
+    print(f"Using interval of {interval/60:.2f} mins")
+    #print(f"Bearings for satellites North ({sat_north_satnum}), South ({sat_south_satnum}), East ({sat_east_satnum}), West ({sat_west_satnum}) for {loop_cnt} loops")
+    print(f"Bearings for satellites Fore ({fore_sat_satnum}), Aft ({aft_sat_satnum}), East ({sat_east_satnum}), West ({sat_west_satnum}) for {loop_cnt} loops")
+    for i in range(loop_cnt): 
+        heading = get_heading_by_satnum_degrees(random_routing_sat.sat.model.satnum)
+        #sat_north_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, sat_north_satnum, heading)
+        #sat_south_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, sat_south_satnum, heading)
+        fore_sat_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, fore_sat_satnum, heading)
+        aft_sat_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, aft_sat_satnum, heading)
+        sat_east_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, sat_east_satnum, heading)
+        sat_west_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, sat_west_satnum, heading)
+        lat, lon = random_routing_sat.get_sat_lat_lon_degrees()
+        #print(cur_time.utc_jpl())
+        print(f"Sat pos: Lat:{lat:.2f}\tLon:{lon:.2f}\tHeading: {heading:.2f} |\tFore: {fore_sat_bearing:.2f}\tAft: {aft_sat_bearing:.2f}\tEast: {sat_east_bearing:.2f}\tWest: {sat_west_bearing:.2f}")
+        increment_time()
+    """
+    """
+    random_num = 503
+    print(f"Starting with satellite satnum {random_num}")
+    random_routing_sat = sat_object_list[random_num]
+
+    routing_sat_fore = random_routing_sat.get_fore_sat()
+    routing_sat_aft = random_routing_sat.get_aft_sat()
+
+    random_sat_satnum = random_routing_sat.sat.model.satnum
+    fore_sat_satnum = routing_sat_fore.sat.model.satnum
+    aft_sat_satnum = routing_sat_aft.sat.model.satnum
+    
+    interval = 60 # seconds
+    set_time_interval(interval)
+    loop_cnt = 90 # 90
+    for i in range(loop_cnt):
+        port_int_bearing = -1
+        port_int_distance = -1
+        port_int_rate = -1
+        port_int_satnum = -1
+        starboard_int_bearing = -1
+        starboard_int_distance = -1
+        starboard_int_rate = -1
+        starboard_int_satnum = -1
+        heading = get_heading_by_satnum_degrees(random_routing_sat.sat.model.satnum)
+        lat, lon = random_routing_sat.get_sat_lat_lon_degrees()
+        #fore_sat_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, fore_sat_satnum, heading)
+        #aft_sat_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, aft_sat_satnum, heading)
+        fore_sat_distance, _ = get_sat_distance_and_rate_by_satnum(random_sat_satnum, fore_sat_satnum)
+        aft_sat_distance, _ = get_sat_distance_and_rate_by_satnum(random_sat_satnum, aft_sat_satnum)
+        preceeding_orbit_sat_satnum, preceeding_orbit_sat_int = random_routing_sat.check_preceeding_orbit_sat_available()
+        if not preceeding_orbit_sat_satnum is None:
+            if 'port' in preceeding_orbit_sat_int:
+                port_int_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, preceeding_orbit_sat_satnum, heading)
+                port_int_distance, port_int_rate = get_sat_distance_and_rate_by_satnum(random_sat_satnum, preceeding_orbit_sat_satnum)
+                port_int_satnum = preceeding_orbit_sat_satnum
+            else:
+                starboard_int_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, preceeding_orbit_sat_satnum, heading)
+                starboard_int_distance, starboard_int_rate = get_sat_distance_and_rate_by_satnum(random_sat_satnum, preceeding_orbit_sat_satnum)
+                starboard_int_satnum = preceeding_orbit_sat_satnum
+        succeeding_orbit_sat_satnum, succeeding_orbit_sat_int = random_routing_sat.check_succeeding_orbit_sat_available()
+        if not succeeding_orbit_sat_satnum is None:
+            if 'port' in succeeding_orbit_sat_int:
+                port_int_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, succeeding_orbit_sat_satnum, heading)
+                port_int_distance, port_int_rate = get_sat_distance_and_rate_by_satnum(random_sat_satnum, succeeding_orbit_sat_satnum)
+                port_int_satnum = succeeding_orbit_sat_satnum
+            else:
+                starboard_int_bearing = get_rel_bearing_by_satnum_degrees(random_sat_satnum, succeeding_orbit_sat_satnum, heading)
+                starboard_int_distance, starboard_int_rate = get_sat_distance_and_rate_by_satnum(random_sat_satnum, succeeding_orbit_sat_satnum)
+                starboard_int_satnum = succeeding_orbit_sat_satnum
+        #print(f"Sat Heading: {heading:.2f} |\tFore ({fore_sat_satnum}): {fore_sat_bearing:.2f}\tAft ({aft_sat_satnum}): {aft_sat_bearing:.2f}\tPor sat ({port_int_satnum}): {port_int_bearing:.2f}\tdist: {port_int_distance:.2f}\trate: {port_int_rate:.2f}\tSta sat ({starboard_int_satnum}): {starboard_int_bearing:.2f}\tdist: {starboard_int_distance:.2f}\trate: {starboard_int_rate:.2f}")
+        print(f"Sat Lat: {lat:06.2f} | Fore ({fore_sat_satnum}[{random_routing_sat.sat_index_North}]): dist: {fore_sat_distance:.0f}| Aft ({aft_sat_satnum}[{random_routing_sat.sat_index_South}]): dist: {aft_sat_distance:.0f}| Por sat ({port_int_satnum:3.0f}): {port_int_bearing:6.2f} dist: {port_int_distance:3.0f} rate: {port_int_rate:5.2f}| Sta sat ({starboard_int_satnum:3.0f}): {starboard_int_bearing:6.2f} rate: {starboard_int_rate:5.2f} dist: {starboard_int_distance:3.0f}")
+        #if (loop_cnt%10) == 0:
+        if False:
+            plot_list = [random_sat_satnum, fore_sat_satnum, aft_sat_satnum]
+            if not preceeding_orbit_sat_satnum is None:
+                plot_list.append(preceeding_orbit_sat_satnum)
+            if not succeeding_orbit_sat_satnum is None:
+                plot_list.append(succeeding_orbit_sat_satnum)
+            draw_static_plot(plot_list, f'Satnum: {random_sat_satnum}; Lat: {lat:.2f}', False)
+        increment_time()
+
+    exit()
+    """
+
+    """
+    random_sat_geoc = random_routing_sat.sat.at(cur_time)
+    random_sat_geoc_next = random_routing_sat.sat.at(cur_time_next)
+    random_sat_bearing = get_bearing_degrees(random_sat_geoc, random_sat_geoc_next)
+    print(f"Random Sat bearing is: {random_sat_bearing}deg")
+
+    sat_west_geoc = sat_west.sat.at(cur_time)
+    sat2_bearing_abs = get_bearing_degrees(random_sat_geoc, sat_west_geoc)
+    print(f"Sat_west abs bearing: {sat2_bearing_abs}deg")
+
+    sat2_bearing_rel = sat2_bearing_abs - random_sat_bearing
+    print(f"Sat_west relative bearing: {sat2_bearing_rel}deg")
+    sat_west_bearing_rel = (sat2_bearing_rel + 360) % 360
+    print(f"Adjusted Sat_west relative bearing: {sat2_bearing_rel}deg")
+
+    sat_north_geoc = sat_north.sat.at(cur_time)
+    sat_south_geoc = sat_south.sat.at(cur_time)
+    sat_east_geoc = sat_east.sat.at(cur_time)
+
+    sat_north_bearing_abs = get_bearing_degrees(random_sat_geoc, sat_north_geoc)
+    sat_south_bearing_abs = get_bearing_degrees(random_sat_geoc, sat_south_geoc)
+    sat_east_bearing_abs = get_bearing_degrees(random_sat_geoc, sat_east_geoc)
+
+    sat_north_bearing_rel = sat_north_bearing_abs - random_sat_bearing
+    sat_north_bearing_rel = (sat_north_bearing_rel + 360) % 360
+    sat_south_bearing_rel = sat_south_bearing_abs - random_sat_bearing
+    sat_south_bearing_rel = (sat_south_bearing_rel + 360) % 360
+    sat_east_bearing_rel = sat_east_bearing_abs - random_sat_bearing
+    sat_east_bearing_rel = (sat_east_bearing_rel + 360) % 360
+
+    print(f"Sat_north rel bearing: {sat_north_bearing_rel}deg")
+    print(f"Sat_south rel bearing: {sat_south_bearing_rel}deg")
+    print(f"Sat_east rel bearing: {sat_east_bearing_rel}deg")
+    print(f"Sat_west rel bearing: {sat_west_bearing_rel}deg")
+    """
+
+
+
+"""
+    random_routing_sat.find_cur_pos_diff(sat_east)
+    random_routing_sat.find_cur_pos_diff(sat_west)
+    random_routing_sat.find_cur_pos_diff(sat_north)
+    random_routing_sat.find_cur_pos_diff(sat_south)
+
+    random_routing_sat.find_cur_pos_diff_spherical(sat_east)
+    random_routing_sat.find_cur_pos_diff_spherical(sat_west)
+    random_routing_sat.find_cur_pos_diff_spherical(sat_north)
+    random_routing_sat.find_cur_pos_diff_spherical(sat_south)
+"""
+    #find_route_random(src, dest)
+
+    #find_route_dijkstra(src, dest)
+
+    #exit()
 
 if __name__ == "__main__":
     main()
