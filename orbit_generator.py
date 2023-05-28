@@ -41,6 +41,8 @@ cur_time = 0
 num_sats = 0
 eph = None
 packet_schedule = {} # a dictionary with time interval integers as keys and lists of packets as values - the list values are tuples of (src, dest)
+disruption_schedule = {} # a dictionary with time interval integers as keys and lists of satellites or regions, along with time intervals, as values
+# e.g. {0: [('sat', 443, 3), ('reg', GeographicPosition, 5), ('sat', 843, 1)]}
 
 # Packet variables
 packet_bandwidth_per_sec = 100 # the number of packets a satellite can send in a one sec time interval (so this should be multiplied by the time interval to get the number of packets that can be sent in that time interval)
@@ -119,6 +121,7 @@ class RoutingSat:
         self.starboard_int_up = True
         self.heading = None # ensure this is referenced only when you know it has been set for the current time
         self.congestion_cnt = 0
+        self.is_disrupted = False
 
     # ::: distributed routing packet structure: [[prev_hop_list], distance_traveled, dest_gs, source_gs] - packet is at destination when satellite is above dest_gs
     def distributed_routing_link_state_process_packet_queue(self):
@@ -818,7 +821,7 @@ def get_routing_sat_obj_by_satnum(satnum):
     for routing_sat_obj in sat_object_list:
         if routing_sat_obj.sat.model.satnum == satnum:
             return routing_sat_obj
-    print(f'No satellite found for satnum: {satnum} - number of satellites: {len(sat_object_list)}')
+    print(f'::get_routing_sat_obj_by_satnum:: ERROR - No satellite found for satnum: {satnum} - number of satellites: {len(sat_object_list)}')
     return None
 
 def find_closest_satnum_to_terminal(GeoPos):
@@ -1256,10 +1259,6 @@ def find_route_dijkstra_dist(src, dest):
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(src)):
-            topo_position = (r_sat.sat - src).at(cur_time)
-            alt, az, dist = topo_position.altaz()    
-            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at source')
-            print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
             break # Just go with first satellite
     if not sat_found:
@@ -1271,10 +1270,6 @@ def find_route_dijkstra_dist(src, dest):
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(dest)):
-            topo_position = (r_sat.sat - dest).at(cur_time)
-            alt, az, dist = topo_position.altaz()    
-            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at destination')
-            print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
             break # Just go with first satellite
     if not sat_found:
@@ -1343,7 +1338,6 @@ def find_route_dijkstra_dist(src, dest):
             if unvisted_sat_dict[unvisited_satnum][0] < next_hop_dist:
                 next_hop_dist = unvisted_sat_dict[unvisited_satnum][0]
                 next_hop_satnum = unvisited_satnum
-        #print(f"Next node visit is to satnum: {unvisited_satnum}")
 
         # Were there no nodes with distances other than infinity?  Something went wrong
         if next_hop_dist == float('inf'):
@@ -1354,10 +1348,6 @@ def find_route_dijkstra_dist(src, dest):
         # Get sat routing object for indicated satnum
         cur_sat = get_routing_sat_obj_by_satnum(next_hop_satnum)
         cur_sat_dist = unvisted_sat_dict[cur_sat.sat.model.satnum][0]
-        #for routing_sat_obj in sat_object_list:
-        #    if routing_sat_obj.sat.model.satnum == next_hop:
-        #        cur_sat = routing_sat_obj
-        #        break
         loop_cnt += 1
     # Done with loop; check if a route was found
     if not route_found:
@@ -1371,8 +1361,8 @@ def find_route_dijkstra_dist(src, dest):
     link_distance = 0
     while True:
         next_hop = visited_sat_dict[cur_satnum][1]
-        if next_hop == None:
-            print(f"::find_route_dijkstra_dist():: ERROR - next_hop in visted_sat_dict is None; cur_satnum: {cur_satnum} / visited_sat_dict: {visited_sat_dict}")
+        if next_hop == -1:
+            print(f"::find_route_dijkstra_dist():: ERROR - no next_hop in visted_sat_dict!; cur_satnum: {cur_satnum} / visited_sat_dict: {visited_sat_dict}")
             num_route_calc_failures += 1
             return -1
         link_distance += get_sat_distance(get_routing_sat_obj_by_satnum(cur_satnum).sat.at(cur_time), get_routing_sat_obj_by_satnum(next_hop).sat.at(cur_time))
@@ -1381,12 +1371,7 @@ def find_route_dijkstra_dist(src, dest):
             break
         cur_satnum = next_hop
 
-    #compute_time = time.process_time() - start
-    #print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
-    #print(f"Transit list:\n{traverse_list}")
     traverse_list.reverse()
-    #draw_static_plot(traverse_list, [dest, src], title=f'Planned Dijkstra Distance: {len(traverse_list)} hops, {int(link_distance)}km distance', draw_lines = True, draw_sphere = True)
-    # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
     packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest}
     send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
     
@@ -1397,28 +1382,20 @@ def find_route_dijkstra_hop(src, dest):
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(src)):
-            topo_position = (r_sat.sat - src).at(cur_time)
-            alt, az, dist = topo_position.altaz()    
-            #print(f'Satellite {r_sat.sat.model.satnum} is at least {req_elev}deg off horizon at source')
-            #print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
             break # Just go with first satellite
     if not sat_found:
-        #print(f"Unable to find satellite over source!")
+        print(f"Unable to find satellite over source!")
         return -1
     src_routing_sat = r_sat
 
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(dest)):
-            topo_position = (r_sat.sat - dest).at(cur_time)
-            alt, az, dist = topo_position.altaz()    
-            #print(f'Satellite {r_sat.sat.model.satnum} is at least {req_elev}deg off horizon at destination')
-            #print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
             break # Just go with first satellite
     if not sat_found:
-        #print(f"Unable to find satellite over destination!")
+        print(f"Unable to find satellite over destination!")
         return -1
     dest_routing_sat = r_sat
 
@@ -1434,7 +1411,6 @@ def find_route_dijkstra_hop(src, dest):
     cur_sat_dist = 0
     route_found = False
 
-    #start = time.process_time()
     loop_cnt = 0
 
     print("Starting Dijsktra Loop")
@@ -1456,7 +1432,6 @@ def find_route_dijkstra_hop(src, dest):
         for testing_sat in cur_sat_neigh_list:
             if not testing_sat is None:
                 if testing_sat.sat.model.satnum in unvisted_sat_dict:
-                    #testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
                     testing_sat_dist = 1 # just a single hop from current satellite to testing satellite
                     tentative_dist = cur_sat_dist + testing_sat_dist
                     if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
@@ -1468,7 +1443,6 @@ def find_route_dijkstra_hop(src, dest):
         
         # Test to see if we just set the destination node as 'visited'
         if cur_sat.sat.model.satnum == dest_routing_sat.sat.model.satnum:
-            #print("Algorithm reached destination node")
             route_found = True  # Indicate the destination has been reached and break out of the loop
             break
 
@@ -1483,7 +1457,6 @@ def find_route_dijkstra_hop(src, dest):
             if unvisted_sat_dict[unvisited_satnum][0] < next_hop_dist:
                 next_hop_dist = unvisted_sat_dict[unvisited_satnum][0]
                 next_hop_satnum = unvisited_satnum
-        #print(f"Next node visit is to satnum: {unvisited_satnum}")
 
         # Were there no nodes with distances other than infinity?  Something went wrong
         if next_hop_dist == float('inf'):
@@ -1493,10 +1466,6 @@ def find_route_dijkstra_hop(src, dest):
         # Get sat routing object for indicated satnum
         cur_sat = get_routing_sat_obj_by_satnum(next_hop_satnum)
         cur_sat_dist = unvisted_sat_dict[cur_sat.sat.model.satnum][0]
-        #for routing_sat_obj in sat_object_list:
-        #    if routing_sat_obj.sat.model.satnum == next_hop:
-        #        cur_sat = routing_sat_obj
-        #        break
         loop_cnt += 1
     # Done with loop; check if a route was found
     if not route_found:
@@ -1515,19 +1484,13 @@ def find_route_dijkstra_hop(src, dest):
             break
         cur_satnum = next_hop
 
-    #compute_time = time.process_time() - start
-    #print(f"Path has {len(traverse_list)} hops and distance of {link_distance:.2f}km ({link_distance * secs_per_km:.2f} seconds); compute time {compute_time}")
-    #print(f"Transit list:\n{traverse_list}")
     traverse_list.reverse()
-    #draw_static_plot(traverse_list, [dest, src], title=f'Planned Dijkstra Hop: {len(traverse_list)} hops, {int(link_distance)}km distance', draw_lines = True, draw_sphere = True)
-    # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
     packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest}
     send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
 
 # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
 def send_directed_routing_packet_from_source(starting_satnum, starting_terminal, packet):  # must have next_hop_list pre_built
     global no_sat_overhead_cnt
-    #print(f"::send_directed_routing_packet_from_source():: starting_satnum: {starting_satnum}, starting_terminal: {starting_terminal}, packet: {packet}")
     starting_sat = get_routing_sat_obj_by_satnum(starting_satnum)
 
     topo_position = (starting_sat.sat - starting_terminal).at(cur_time)
@@ -1549,9 +1512,7 @@ def send_distributed_routing_packet_from_source(src, dest):
     if not sat_overhead:
         return -1
     distance = get_sat_distance(src.at(cur_time), routing_sat.sat.at(cur_time))
-    # ::: distributed routing packet structure: [[prev_hop_list], distance_traveled, dest_gs] - packet is at destination when satellite is above dest_gs
     packet = {'prev_hop_list': [], 'distance_traveled': distance, 'dest_gs': dest, 'source_gs': src}
-    #print(f"::send_distributed_routing_packet_from_source():: starting_terminal: {src}, packet: {packet}")
     add_to_packet_qu_by_satnum(routing_sat.sat.model.satnum, packet)
 
 def build_constellation(source_sat):
@@ -1755,7 +1716,61 @@ def distributed_link_state_routing():
         
 def build_disruption_schedule():
     # select satellites randomly and for random durations (short) to disrupt
-    pass
+    # disruptions are enabled/disabled during time increments
+    # satellites can either be set 'disrupted' by scheduler or
+    # satellites can be disrupted by 'time intervals' when they are over a geographic region
+    # scheduler will need to decide:
+    #   1. single satellite or geographic region
+    #   2. which satellite or region
+    #   3. and how long to disrupt
+    #disruption_schedule = {} # a dictionary with time interval integers as keys and lists of satellites or regions, along with time intervals, as values
+    # e.g. {0: [('sat', 443, 3), ('reg', GeographicPosition, 5), ('sat', 843, 1)]}
+    
+    # Disruption likelihood:
+    #   50% - No disruption
+    #   30% - Single satellite disruption
+    #   15% - Single region disruption
+    #    5% - Multiple satellite disruption (2 satellites)
+    # Disruption duration:
+    #   50% - 1 time interval
+    #   30% - 2 time intervals
+    #   20% - 3 time intervals
+    
+    global disruption_schedule
+
+    for interval in range(num_time_intervals):
+        disruption_schedule[interval] = []
+        random_num = random.randint(0, 99)
+        if random_num < 50:
+            # no disruption
+            continue
+        elif random_num < 80:
+            # single satellite disruption
+            sat = random.randint(0, num_sats - 1)
+            duration = random.randint(1, 3)
+            disruption_schedule[interval].append(('sat', sat, duration))
+        elif random_num < 95:
+            # single region disruption
+            # NOTE: need to figure out how to select a region
+            #  maybe just randomly select a lat/lon and build a GeographicPosition object
+            region_lat = random.randint(-900000, 900000)
+            region_lat = region_lat / 10000
+            region_lon = random.randint(-1800000, 1800000)
+            region_lon = region_lon / 10000
+            region = wgs84.latlon(region_lat, region_lon)
+            duration = random.randint(1, 3)
+            disruption_schedule[interval].append(('reg', region, duration))
+        else:
+            # multiple satellite disruption
+            sat1 = random.randint(0, num_sats - 1)
+            sat2 = random.randint(0, num_sats - 1)
+            while sat2 == sat1:
+                sat2 = random.randint(0, num_sats - 1)
+            duration = random.randint(1, 3)
+            disruption_schedule[interval].append(('sat', sat1, duration))
+            disruption_schedule[interval].append(('sat', sat2, duration))
+
+
 
 # generate the list packet_schedule that contains a list of packets to be sent at each time interval
 def build_packet_schedule():
