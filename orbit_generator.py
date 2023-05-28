@@ -176,6 +176,11 @@ class RoutingSat:
 
     # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_gs] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
     def directed_routing_process_packet_queue(self):
+        global no_sat_overhead_cnt
+        global num_packets_dropped
+        global num_packets_received
+        global num_route_calc_failures
+
         if (self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval) or (len(self.packet_qu) == 0):
             return -1
         sent_packet = False
@@ -201,16 +206,21 @@ class RoutingSat:
             if self.sat.model.satnum  == packet['dest_satnum']:
                 if not self.is_overhead_of(packet['dest_gs']):
                     print(f"Reached final satnum, but not overhead destination terminal!")
+                    no_sat_overhead_cnt += 1
+                    num_packets_dropped += 1
                     self.packet_qu.remove(packet)
                     continue
                 topo_position = (self.sat - packet['dest_gs']).at(cur_time)
                 alt, _, dist = topo_position.altaz()
                 if alt.degrees < req_elev:
                     print(f"Satellite {self.sat.model.satnum} is not {req_elev}deg overhead destination terminal")
+                    no_sat_overhead_cnt += 1
+                    num_packets_dropped += 1
                     self.packet_qu.remove(packet)
                     continue
                 packet['distance_traveled'] += dist.km
                 print(f"{self.sat.model.satnum}: Packet reached destination in {len(packet['prev_hop_list'])} hops.  Total distance: {packet['distance_traveled']}km")
+                num_packets_received += 1
                 self.packet_qu.remove(packet)
                 sent_packet = True
                 self.packets_sent_cnt += 1
@@ -228,8 +238,11 @@ class RoutingSat:
                 else:
                     print(f"({self.sat.model.satnum})No connection to satnum {target_satnum}")
                     self.packet_qu.remove(packet)
+                    num_route_calc_failures += 1
         if sent_packet:
             return 0
+        else:
+            return -1
 
     def get_curr_geocentric(self):
         return self.sat.at(cur_time)
@@ -1677,7 +1690,8 @@ def directed_dijkstra_distance_routing():
                 if find_route_dijkstra_dist(src, dest) == -1:
                     print(f"Unable to find route to {src}", end='\r')                
                     num_packets_dropped += 1
-                num_packets_sent += 1
+                else:
+                    num_packets_sent += 1
             del packet_schedule[time_interval]
         # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
         packets_sent = True
