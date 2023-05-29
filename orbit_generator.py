@@ -4,7 +4,7 @@ from sgp4.api import Satrec, WGS72
 #import pandas as pd
 import random
 from datetime import date, timedelta
-from math import pi, floor, sqrt, ceil
+from math import pi, floor, sqrt
 import math
 import time
 import os # for cpu_count()
@@ -21,6 +21,7 @@ draw_static_orbits = False
 draw_distributed_orbits = False
 testing = False
 plot_dropped_packets = False
+do_disruptions = True
 
 # Multi threading
 do_multithreading = True
@@ -43,17 +44,20 @@ eph = None
 packet_schedule = {} # a dictionary with time interval integers as keys and lists of packets as values - the list values are tuples of (src, dest)
 disruption_schedule = {} # a dictionary with time interval integers as keys and lists of satellites or regions, along with time intervals, as values
 # e.g. {0: [('sat', 443, 3), ('reg', GeographicPosition, 5), ('sat', 843, 1)]}
+disrupted_regions_dict = {} # a dictionary with GeographicPosition objects as keys and TTL values as values
 
 # Packet variables
 packet_bandwidth_per_sec = 100 # the number of packets a satellite can send in a one sec time interval (so this should be multiplied by the time interval to get the number of packets that can be sent in that time interval)
 packet_backlog_size = 1000 # the number of packets that can be stored in a satellite's queue (10 sec worth of data)
-packets_generated_per_interval = 100 # the number of packets generated per time interval by the packet scheduler
+packet_start_TTL = 10 # the number of seconds a packet can be stored in a satellite's queue before it is dropped
+packets_generated_per_interval = 20 # 100 # the number of packets generated per time interval by the packet scheduler
 
 # Time variables
 time_scale = load.timescale()
 time_interval = 10 # interval between time increments, measured in seconds
 secs_per_km = 0.0000033
 num_time_intervals = 5
+cur_time_increment = 0
 
 # Orbit characteristics
 # Starlink Shell 1:  https://everydayastronaut.com/starlink-group-6-1-falcon-9-block-5-2/
@@ -66,6 +70,9 @@ lateral_antenna_range = 30 #30
 
 # Ground Station characteristics
 req_elev = 40 # https://www.reddit.com/r/Starlink/comments/i1ua2y/comment/g006krb/?utm_source=share&utm_medium=web2x
+
+# :: Routing Global Variables ::
+routing_name = None
 
 # Distributed routing admin values
 distributed_max_hop_count = 50
@@ -122,9 +129,15 @@ class RoutingSat:
         self.heading = None # ensure this is referenced only when you know it has been set for the current time
         self.congestion_cnt = 0
         self.is_disrupted = False
+        self.disruption_ttl = 0
 
     # ::: distributed routing packet structure: [[prev_hop_list], distance_traveled, dest_gs, source_gs] - packet is at destination when satellite is above dest_gs
     def distributed_routing_link_state_process_packet_queue(self):
+        if do_disruptions:
+            if self.is_disrupted:
+                print(f"::distributed_routing_link_state_process_packet_queue: satellite {self.satnum} is disrupted, so not processing packets")
+                return -1 # don't process packets if the satellite is disrupted
+
         if (self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval) or (len(self.packet_qu) == 0):
             return -1
         sent_packet = False
@@ -140,7 +153,7 @@ class RoutingSat:
                 topo_position = (self.sat - packet['dest_gs']).at(cur_time)
                 _, _, dist = topo_position.altaz()
                 packet['distance_traveled'] += dist.km
-                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination in {len(packet['prev_hop_list'])} hops.  Total distance: {int(packet['distance_traveled'])}km == source: {packet['source_gs']} -- destination: {packet['dest_gs']}")
+                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination in {len(packet['prev_hop_list'])} hops.  Total distance: {int(packet['distance_traveled']):,.0f}km (transit time: {secs_per_km * int(packet['distance_traveled']):.2f} seconds)") # == source: {packet['source_gs']} -- destination: {packet['dest_gs']}")
                 global num_packets_received
                 num_packets_received += 1
                 #if len(packet['prev_hop_list']) > 10:
@@ -149,7 +162,7 @@ class RoutingSat:
                 sent_packet = True
                 self.packets_sent_cnt += 1
             elif len(packet['prev_hop_list']) > distributed_max_hop_count:
-                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet to destination {packet['dest_gs']} exceeded max hop count.  Dropping packet.")
+                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet exceeded max hop count.  Dropping packet.")
                 num_max_hop_packets_dropped += 1
                 num_packets_dropped += 1
                 if plot_dropped_packets:
@@ -183,6 +196,11 @@ class RoutingSat:
         global num_packets_dropped
         global num_packets_received
         global num_route_calc_failures
+
+        if do_disruptions:
+            if self.is_disrupted:
+                print(f"::directed_routing_process_packet_queue: satellite {self.satnum} is disrupted, so not processing packets")
+                return -1 # don't process packets if satellite is disrupted
 
         if (self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval) or (len(self.packet_qu) == 0):
             return -1
@@ -222,7 +240,7 @@ class RoutingSat:
                     self.packet_qu.remove(packet)
                     continue
                 packet['distance_traveled'] += dist.km
-                print(f"{self.sat.model.satnum}: Packet reached destination in {len(packet['prev_hop_list'])} hops.  Total distance: {packet['distance_traveled']}km")
+                print(f"{self.sat.model.satnum}: Packet reached destination in {len(packet['prev_hop_list'])} hops.  Total distance: {packet['distance_traveled']:,.0f}km (transit time: {secs_per_km * int(packet['distance_traveled']):.2f} seconds)")
                 num_packets_received += 1
                 self.packet_qu.remove(packet)
                 sent_packet = True
@@ -657,9 +675,8 @@ class RoutingSat:
         rel_bearing = (rel_bearing + 360) % 360
 
         return rel_bearing
-    # update the state of links to all direct neighbor sats
-    def update_neigh_state(self, congestion = None):
-        # find which, if any, sats are port/starboard neighbors
+    
+    def find_port_starboard_neighbors(self):
         self.port_sat_satnum = None
         self.starboard_sat_satnum = None
         preceeding_orbit_satnum, preceeding_orbit_int = self.check_preceeding_orbit_sat_available()
@@ -674,6 +691,17 @@ class RoutingSat:
                 self.port_sat_satnum = succeeding_orbit_satnum
             else:
                 self.starboard_sat_satnum = succeeding_orbit_satnum
+
+    # update the state of links to all direct neighbor sats
+    def update_state_to_neighbors(self, congestion = None):
+        if do_disruptions:
+            if self.is_disrupted:  # if this sat is disrupted, don't update state to neighbors
+                print(f"::update_state_to_neighbors:: sat {self.sat.model.satnum} is disrupted, not updating state to neighbors")
+                return
+
+        # find which, if any, sats are port/starboard neighbors
+        self.find_port_starboard_neighbors()
+        
         # build list of neighbor sats to update
         neigh_routing_sat_list = []
         if self.fore_int_up:
@@ -713,6 +741,22 @@ class RoutingSat:
                 neigh_routing_sat.neigh_state_dict[self.sat.model.satnum]['has_neigh_connection_down'] = neigh_connection_down
                 neigh_routing_sat.neigh_state_dict[self.sat.model.satnum]['has_neigh_congested'] = neigh_congested 
 
+    def update_neigh_state_table(self):
+        if do_disruptions:
+            if self.is_disrupted: # if this sat is disrupted, don't update internal link status
+                print(f"::update_neigh_state_table:: sat {self.sat.model.satnum} is disrupted, so not updating internal link status")
+                return
+        print(f"r_sat.sat.model.satnum: {self.sat.model.satnum}", end="\r")
+        for satnum in self.neigh_state_dict:
+            last_neigh_status = self.neigh_state_dict[satnum]['last_recv_status']
+            if last_neigh_status != cur_time:
+                self.neigh_state_dict[satnum]['connection_up'] = False
+            else:
+                old_link_status = self.neigh_state_dict[satnum]['connection_up']
+                self.neigh_state_dict[satnum]['connection_up'] = True
+                if old_link_status == False:
+                    self.neigh_state_dict[satnum]['connection_last_down'] = cur_time
+
     # indicates if any connections to current neighbors are either down or congested
     # returns niegh_congested, neigh_connection_down
     def check_internal_link_status(self):
@@ -736,8 +780,8 @@ class RoutingSat:
                                         #  neigh_last_down:  (time),  - self setting
                                         #  neigh_congested: (True/False)} - neigh setting
 
-# multi-threaded version of update_neigh_state()
-def mt_publish_state_to_neigh(thread_num):
+# multi-threaded version of update_state_to_neighbors()
+def mt_update_state_to_neighbors(thread_num):
     sat_object_range = floor(len(sat_object_list) / num_threads)
     start = thread_num * sat_object_range
     end = start + sat_object_range
@@ -745,7 +789,7 @@ def mt_publish_state_to_neigh(thread_num):
         end = len(sat_object_list)
     print(f"::mt_update_neigh_state() :: thread {thread_num} : publishing states to neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
-        r_sat.update_neigh_state()
+        r_sat.update_state_to_neighbors()
     print(f"::mt_update_neigh_state() :: thread {thread_num} : finished publishing states to neighbors", end='\r')
 
 def mt_update_neigh_state_table(thread_num):
@@ -756,24 +800,26 @@ def mt_update_neigh_state_table(thread_num):
         end = len(sat_object_list)
     print(f"::mt_update_neigh_state_table() :: thread {thread_num} : updating internal states of neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
-        for satnum in r_sat.neigh_state_dict: # now update internal link states
-            last_neigh_status = r_sat.neigh_state_dict[satnum]['last_recv_status']
-            if last_neigh_status != cur_time:
-                r_sat.neigh_state_dict[satnum]['connection_up'] = False
-            else:
-                old_link_status = r_sat.neigh_state_dict[satnum]['connection_up']
-                r_sat.neigh_state_dict[satnum]['connection_up'] = True
-                if old_link_status == False:
-                    r_sat.neigh_state_dict[satnum]['connection_last_down'] = cur_time
+        r_sat.update_neigh_state_table()
     print(f"::mt_update_neigh_state_table() :: thread {thread_num} : finished updating internal neighbor state table", end='\r')
-
+"""
+def mt_update_neigh_state(thread_num):
+    sat_object_range = floor(len(sat_object_list) / num_threads)
+    start = thread_num * sat_object_range
+    end = start + sat_object_range
+    if thread_num == num_threads - 1:
+        end = len(sat_object_list)
+    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : updating internal states of neighbors from {start} to {end}", end='\r')
+    for r_sat in sat_object_list[start:end]:
+        r_sat.update_neigh_state()
+"""
 def all_sats_update_neigh_state():
     print("::all_sats_update_neigh_state() :: publishing states to neighbors")
     # publish link state to neighbors first!
     if do_multithreading:
         thread_list = []
         for index in range(num_threads):
-            thread = threading.Thread(target=mt_publish_state_to_neigh, args=(index,))
+            thread = threading.Thread(target=mt_update_state_to_neighbors, args=(index,))
             thread.start()
             thread_list.append(thread)
         for thread in thread_list:
@@ -781,8 +827,9 @@ def all_sats_update_neigh_state():
     else:
         for r_sat in sat_object_list:
             print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
-            r_sat.update_neigh_state() 
+            r_sat.update_state_to_neighbors() 
     print("\n::all_sats_update_neigh_state() :: updating internal states of neighbors")
+
     # now update those link states internally
     if do_multithreading:
         thread_list = []
@@ -794,16 +841,7 @@ def all_sats_update_neigh_state():
             thread.join()
     else:
         for r_sat in sat_object_list:
-            print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
-            for satnum in r_sat.neigh_state_dict:
-                last_neigh_status = r_sat.neigh_state_dict[satnum]['last_recv_status']
-                if last_neigh_status != cur_time:
-                    r_sat.neigh_state_dict[satnum]['connection_up'] = False
-                else:
-                    old_link_status = r_sat.neigh_state_dict[satnum]['connection_up']
-                    r_sat.neigh_state_dict[satnum]['connection_up'] = True
-                    if old_link_status == False:
-                        r_sat.neigh_state_dict[satnum]['connection_last_down'] = cur_time
+            r_sat.update_neigh_state_table()
         print("\n")
 
 def add_to_packet_qu_by_satnum(target_satnum, packet):
@@ -925,17 +963,78 @@ def get_sat_distance_and_rate_by_satnum(sat1_satnum, sat2_satnum): # returns dis
     distance_next = (sat1_geoc_next - sat2_geoc_next).distance().km
     return distance, (distance_next-distance)
 
+def apply_disruption_schedule():
+    global cur_time_increment, disruption_schedule
+
+    if cur_time_increment not in disruption_schedule: # if no disruptions for this time increment, return
+        print(f"No disruptions for time increment {cur_time_increment}")
+        return
+    disruption_list = disruption_schedule[cur_time_increment] # get list of disruptions for this time increment
+    cur_sat_disruption_dict = {} # dictionary of satellites that are disrupted in this time increment
+
+    removed_disruptions = 0
+    applied_disruptions = 0
+    # check ongoing region disruptions, decrement TTL, and remove if TTL is 0
+    if len (disrupted_regions_dict) > 0:
+        for region in disrupted_regions_dict:
+            disrupted_regions_dict[region] -= 1
+            if disrupted_regions_dict[region] == 0:
+                del disrupted_regions_dict[region]
+                removed_disruptions += 1
+    
+    # apply new disruptions to region disruption list
+    for disruption in disruption_list:
+        dis_type, target, TTL = disruption
+        if dis_type == 'reg':
+            disrupted_regions_dict[target] = TTL
+        elif dis_type == 'sat':
+            cur_sat_disruption_dict[target] = TTL
+        applied_disruptions += 1
+
+    # loop through all satellites and apply disruptions as appropriate
+    for r_sat in sat_object_list:
+        # check for ongoing disruptions
+        if r_sat.is_disrupted and (r_sat.disruption_ttl > 0): # first check for satellite disruptions
+            r_sat.disruption_ttl -= 1
+            if r_sat.disruption_ttl <= 0:  # disruption is finished, so remove - this includes region disruptions, which are reapplied further down
+                r_sat.is_disrupted = False
+        elif r_sat.is_disrupted and (r_sat.disruption_ttl == -1): # check for region disruptions
+            r_sat.is_disrupted = False
+            r_sat.disruption_ttl = 0
+        # check for new disruptions
+        if r_sat.sat.model.satnum in cur_sat_disruption_dict: # check for new satellite disruptions; overwriting existing disruptions
+            r_sat.is_disrupted = True
+            r_sat.packet_qu.clear() # satellite is disrupted, so clear packet queue
+            r_sat.disruption_ttl = cur_sat_disruption_dict[r_sat.sat.model.satnum]
+        if not r_sat.is_disrupted:
+            for region in disrupted_regions_dict:
+                if r_sat.is_overhead_of(region):
+                    r_sat.is_disrupted = True
+                    r_sat.packet_qu.clear() # satellite is disrupted, so clear packet queue
+                    r_sat.disruption_ttl = -1 # set to -1 to indicate that it is a region disruption
+                    break # no need to check other regions if already disrupted
+    print(f"::apply_disruption_schedule:: {applied_disruptions} disruptions applied, {removed_disruptions} disruptions removed")
+
 def increment_time():
-    global cur_time, cur_time_next, time_scale
+    global cur_time, cur_time_next, time_scale, cur_time_increment, num_packets_dropped
     python_t = cur_time.utc_datetime()
     new_python_time = python_t + timedelta(seconds = time_interval)
     cur_time = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
     new_python_time = python_t + timedelta(seconds = time_interval+1)
     cur_time_next = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
-    # reset packet sent counters for all sats
+    # reset packet sent counters for all sats and decrement all packet TTLs, deleting packets as appropriate
     for r_sat in sat_object_list:
         r_sat.packet_sent_cnt = 0
-    print(f"increment_time: Current time incremented to: {cur_time}")
+        if len(r_sat.packet_qu) > 0:
+            for packet in r_sat.packet_qu:
+                packet['TTL'] -= time_interval # decrement by the number of seconds in each time increment
+                if packet['TTL'] <= 0:
+                    num_packets_dropped += 1
+                    print(f"::increment_time:: Packet dropped due to TTL for satnum: {r_sat.sat.model.satnum}")
+                    r_sat.packet_qu.remove(packet)
+    cur_time_increment += 1
+    print(f"::increment_time:: Current time incremented to: {cur_time.utc_jpl()}, time increment: {cur_time_increment}, scheduled time intervals: {num_time_intervals}")
+    if do_disruptions: apply_disruption_schedule() # apply any disruptions that are scheduled for this time increment
 
 def set_time_interval(interval_seconds): # sets the time interval (in seconds)
     global time_interval
@@ -1253,7 +1352,7 @@ def find_route_random(src, dest):
 def find_route_dijkstra_dist(src, dest):
     global no_sat_overhead_cnt
     global num_route_calc_failures
-    print("Starting Dijkstra distance routing")
+    #print("Starting Dijkstra distance routing")
     # Find satellite at least 60 deg above the horizon at source and destination
     # FIX: distances must also include the satnum of which sat put the lowest distance!  Must follow that listing backwards to id path to the source
     sat_found = False
@@ -1293,9 +1392,9 @@ def find_route_dijkstra_dist(src, dest):
     #start = time.process_time()
     loop_cnt = 0
 
-    print("Starting Dijsktra Loop")
+    #print("Starting Dijsktra Distance Loop")
     while True:
-        print(f"Loop count: {loop_cnt}", end="\r")
+        print(f"Pre-computing Dijsktra Distance - Loop count: {loop_cnt}", end="\r")
         
         neigh_fore = cur_sat.get_fore_sat()
         neigh_aft = cur_sat.get_aft_sat()
@@ -1370,15 +1469,17 @@ def find_route_dijkstra_dist(src, dest):
         if next_hop == src_routing_sat.sat.model.satnum:
             break
         cur_satnum = next_hop
-
     traverse_list.reverse()
-    packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest}
+    packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest, 'TTL' : packet_start_TTL}
+    # route pre-computed, so send packet
     send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
     
 def find_route_dijkstra_hop(src, dest):
-    print("Starting Dijkstra hop routing")
+    #print("Starting Dijkstra hop routing")
     # Find satellite at least 60 deg above the horizon at source and destination
     # FIX: distances must also include the satnum of which sat put the lowest distance!  Must follow that listing backwards to id path to the source
+    global num_route_calc_failures, no_sat_overhead_cnt
+
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(src)):
@@ -1386,6 +1487,7 @@ def find_route_dijkstra_hop(src, dest):
             break # Just go with first satellite
     if not sat_found:
         print(f"Unable to find satellite over source!")
+        no_sat_overhead_cnt += 1
         return -1
     src_routing_sat = r_sat
 
@@ -1396,6 +1498,7 @@ def find_route_dijkstra_hop(src, dest):
             break # Just go with first satellite
     if not sat_found:
         print(f"Unable to find satellite over destination!")
+        no_sat_overhead_cnt += 1
         return -1
     dest_routing_sat = r_sat
 
@@ -1413,9 +1516,9 @@ def find_route_dijkstra_hop(src, dest):
 
     loop_cnt = 0
 
-    print("Starting Dijsktra Loop")
+    #print("Starting Dijsktra Loop")
     while True:
-        print(f"Loop count: {loop_cnt}", end="\r")
+        print(f"Pre-computing Dijsktra Hop - Loop count: {loop_cnt}", end="\r")
         
         neigh_fore = cur_sat.get_fore_sat()
         neigh_aft = cur_sat.get_aft_sat()
@@ -1461,6 +1564,7 @@ def find_route_dijkstra_hop(src, dest):
         # Were there no nodes with distances other than infinity?  Something went wrong
         if next_hop_dist == float('inf'):
             print(f"No more neighbors without infinite distances to explore.  {len(visited_sat_dict)} visited nodes; {len(unvisted_sat_dict)} unvisted nodes remaining")
+            num_route_calc_failures += 1
             return -1 
 
         # Get sat routing object for indicated satnum
@@ -1470,6 +1574,7 @@ def find_route_dijkstra_hop(src, dest):
     # Done with loop; check if a route was found
     if not route_found:
         print(f"Unable to find route using dijkstra's algorithm")
+        num_route_calc_failures += 1
         return -1
     
     # Route was found, so retrace steps
@@ -1478,14 +1583,18 @@ def find_route_dijkstra_hop(src, dest):
     link_distance = 0
     while True:
         next_hop = visited_sat_dict[cur_satnum][1]
+        if next_hop == -1:
+            print(f"::find_route_dijkstra_dist():: ERROR - no next_hop in visted_sat_dict!; cur_satnum: {cur_satnum} / visited_sat_dict: {visited_sat_dict}")
+            num_route_calc_failures += 1
+            return -1
         link_distance += get_sat_distance(get_routing_sat_obj_by_satnum(cur_satnum).sat.at(cur_time), get_routing_sat_obj_by_satnum(next_hop).sat.at(cur_time))
         traverse_list.insert(0, next_hop)
         if next_hop == src_routing_sat.sat.model.satnum:
             break
         cur_satnum = next_hop
-
     traverse_list.reverse()
-    packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest}
+    packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest, 'TTL' : packet_start_TTL}
+    # route pre-computed, now send packet
     send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
 
 # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
@@ -1512,7 +1621,7 @@ def send_distributed_routing_packet_from_source(src, dest):
     if not sat_overhead:
         return -1
     distance = get_sat_distance(src.at(cur_time), routing_sat.sat.at(cur_time))
-    packet = {'prev_hop_list': [], 'distance_traveled': distance, 'dest_gs': dest, 'source_gs': src}
+    packet = {'prev_hop_list': [], 'distance_traveled': distance, 'dest_gs': dest, 'source_gs': src, 'TTL' : packet_start_TTL}
     add_to_packet_qu_by_satnum(routing_sat.sat.model.satnum, packet)
 
 def build_constellation(source_sat):
@@ -1608,62 +1717,73 @@ def plot_objects_to_sphere(object_list):
     plt.show()
 
 def directed_dijkstra_hop_routing():
-    global no_sat_overhead_cnt
-    global num_packets_dropped
-    global num_packets_sent
+    global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name
+    routing_name = "Directed Dijkstra Hop"
 
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
-    for time_interval in range(max_time_inverals):
-        if time_interval in packet_schedule:
-            packet_send_list = packet_schedule[time_interval]
+    for _ in range(max_time_inverals):
+        if cur_time_increment in packet_schedule:
+            packet_send_list = packet_schedule[cur_time_increment]  # get list of packets to send for this time interval
+            packet_num = 0
+            packet_send_list_size = len(packet_send_list)
             for packet in packet_send_list:
-                src, dest = packet
-                if find_route_dijkstra_hop(src, dest) == -1:
-                    print("Unable to find route to {src}", end="\r")
-                    num_packets_dropped += 1
                 num_packets_sent += 1
-            del packet_schedule[time_interval]
-        # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
-        packets_sent = True
-        while (packets_sent):
-            packets_sent = False
-            for routing_sat in sat_object_list:
-                if routing_sat.directed_routing_process_packet_queue() == 0:
-                    packets_sent = True
-        if len(packet_schedule) == 0:
-            print("No more packets to send in schedule")
-            break
-    if len(packet_schedule) > 0:
-        print("Failed to send all packets in schedule")
-        print(packet_schedule)
-
-def directed_dijkstra_distance_routing():
-    global no_sat_overhead_cnt
-    global num_packets_dropped
-    global num_packets_sent
-
-    max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
-    for time_interval in range(max_time_inverals):
-        if time_interval in packet_schedule:
-            packet_send_list = packet_schedule[time_interval]
-            for packet in packet_send_list:
                 src, dest = packet
-                if find_route_dijkstra_dist(src, dest) == -1:
-                    print(f"Unable to find route to {src}", end='\r')                
+                print(f"Sending directed packet {packet_num} of {packet_send_list_size} using Dijkstra Hop")
+                packet_num += 1
+                if find_route_dijkstra_hop(src, dest) == -1:  # call pre-calculate routing routing
+                    #print(f"Unable to find route to {src}", end='\r') # if route from source to destination not found, drop packet
                     num_packets_dropped += 1
-                else:
-                    num_packets_sent += 1
-            del packet_schedule[time_interval]
+            del packet_schedule[cur_time_increment] # remove this time increment from packet scheduler
         # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
         packets_sent = True
         while (packets_sent):
             packets_sent = False
-            for routing_sat in sat_object_list:
-                if routing_sat.directed_routing_process_packet_queue() == 0:
+            for routing_sat in sat_object_list:  # loop through all satellites and send packets
+                if routing_sat.directed_routing_process_packet_queue() == 0: # if packets were sent, function returns 0
                     packets_sent = True
         if (len(packet_schedule) == 0) and (num_packets_received + num_packets_dropped == num_packets_sent):
             print("All packets sent and accounted for.  Terminating simulation")
             break
+        increment_time() # go to next time increment and start loop over
+    # looping simulation is finished
+    if len(packet_schedule) > 0:
+        print("Failed to send all packets in schedule")
+        print(packet_schedule)
+    if not (num_packets_received + num_packets_dropped == num_packets_sent):
+        print("Some packets unaccounted for!!")
+
+def directed_dijkstra_distance_routing():
+    global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name
+    routing_name = "Directed Dijkstra Distance"
+
+    max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
+    for _ in range(max_time_inverals):
+        if cur_time_increment in packet_schedule:
+            packet_send_list = packet_schedule[cur_time_increment]  # get list of packets to send for this time interval
+            packet_num = 0
+            packet_send_list_size = len(packet_send_list)
+            for packet in packet_send_list:
+                num_packets_sent += 1
+                src, dest = packet
+                print(f"Sending directed packet {packet_num} of {packet_send_list_size} using Dijkstra Hop")
+                packet_num += 1
+                if find_route_dijkstra_dist(src, dest) == -1:  # call pre-calculate routing routing
+                    #print(f"Unable to find route to {src}", end='\r') # if route from source to destination not found, drop packet
+                    num_packets_dropped += 1
+            del packet_schedule[cur_time_increment] # remove this time increment from packet scheduler
+        # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
+        packets_sent = True
+        while (packets_sent):
+            packets_sent = False
+            for routing_sat in sat_object_list:  # loop through all satellites and send packets
+                if routing_sat.directed_routing_process_packet_queue() == 0: # if packets were sent, function returns 0
+                    packets_sent = True
+        if (len(packet_schedule) == 0) and (num_packets_received + num_packets_dropped == num_packets_sent):
+            print("All packets sent and accounted for.  Terminating simulation")
+            break
+        increment_time() # go to next time increment and start loop over
+    # looping simulation is finished
     if len(packet_schedule) > 0:
         print("Failed to send all packets in schedule")
         print(packet_schedule)
@@ -1671,37 +1791,37 @@ def directed_dijkstra_distance_routing():
         print("Some packets unaccounted for!!")
 
 def distributed_link_state_routing():
-    global no_sat_overhead_cnt
-    global num_packets_dropped
-    global num_packets_sent
+    global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name
+    routing_name = "Distributed Link State"
+
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
     # Work through packet scheduler at each time interval and send all scheduled packets
-    for time_interval in range(max_time_inverals):
-        print(f"::distributed_link_state_routing::  Time interval: {time_interval}")
-        if time_interval in packet_schedule:
-            packet_send_list = packet_schedule[time_interval]
+    for _ in range(max_time_inverals):
+        if cur_time_increment in packet_schedule:
+            packet_send_list = packet_schedule[cur_time_increment] # get list of packets to send for this time increment
             for packet in packet_send_list:
                 src, dest = packet
-                if send_distributed_routing_packet_from_source(src, dest) == -1:
-                    print(f"No satellite overhead starting terminal {src}", end='\r')                
+                if send_distributed_routing_packet_from_source(src, dest) == -1:  # send packets without any pre-calculation
+                    print(f"::distributed_link_state_routing:: No satellite overhead starting terminal {src}, dropping packet")
                     no_sat_overhead_cnt += 1
                     num_packets_dropped += 1
                 num_packets_sent += 1
-            del packet_schedule[time_interval]
+            del packet_schedule[cur_time_increment] # remove time increment from packet scheduler
+        
         print("Updating neighbor states")
         start = time.process_time()
-        # each satellite publishes it's state to it's neighbors and then the satellites process the received data
-        all_sats_update_neigh_state()
+        all_sats_update_neigh_state()  # each satellite publishes it's state to it's neighbors and then the satellites process the received data
         compute_time = time.process_time() - start
         print(f"Time to compute neighbor states: {compute_time}")
-        # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
+        
+        
         print("Checking for packets to send")
         start = time.process_time()
         packets_sent = True
-        while (packets_sent):
+        while (packets_sent):  # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
             packets_sent = False
             for routing_sat in sat_object_list:
-                if routing_sat.distributed_routing_link_state_process_packet_queue() == 0:
+                if routing_sat.distributed_routing_link_state_process_packet_queue() == 0:  # if packets were sent, function returns 0
                     packets_sent = True
         compute_time = time.process_time() - start
         print(f"Time spent to send packets: {compute_time}")
@@ -1769,6 +1889,7 @@ def build_disruption_schedule():
             duration = random.randint(1, 3)
             disruption_schedule[interval].append(('sat', sat1, duration))
             disruption_schedule[interval].append(('sat', sat2, duration))
+        print(f"::build_disruption_schedule:: {len(disruption_schedule[interval])} disruptions scheduled for time interval {interval}")
 
 
 
@@ -1886,7 +2007,6 @@ def build_packet_schedule():
 
     global packet_schedule
 
-
     for interval in range(num_time_intervals):
         for packet_cnt in range(packets_generated_per_interval):
             if packet_cnt == 0:
@@ -1935,6 +2055,8 @@ def main ():
     start_run_time = time.time()
     if do_multithreading:
         print(f"Running with {num_threads} threads")
+    if do_disruptions:
+        print(f"Running with satellite disruptions")
     
     # ---------- SETUP ------------
     # Load TLEs
@@ -1950,8 +2072,8 @@ def main ():
     build_constellation(source_sat)
 
     # Initialize simulation start time
-    global cur_time
-    global cur_time_next
+    global cur_time, cur_time_next, routing_name
+
     cur_time = time_scale.utc(2023, 5, 9, 0, 0, 0)
     cur_time_next = time_scale.utc(2023, 5, 9, 0, 0, 1)
     print(f"Set current time to: {cur_time.utc_jpl()}")
@@ -1960,17 +2082,19 @@ def main ():
 
     # build a schedule of packets to send
     build_packet_schedule()
+    if do_disruptions:
+        build_disruption_schedule() # build a schedule of satellite disruptions
 
     # call routing algorithm to use to send packets
     #distributed_link_state_routing()
-    directed_dijkstra_distance_routing()
-    #directed_dijkstra_hop_routing()
+    #directed_dijkstra_distance_routing()
+    directed_dijkstra_hop_routing()
 
     # ---------- RESULTS ------------
     print_global_counters()
 
     full_run_time = time.time() - start_run_time
-    print(f"Full run time: {full_run_time} seconds")
+    print(f"Full run time for {routing_name}: {floor(full_run_time/60)} minutes and {full_run_time % 60:,.2f} seconds")
     exit ()
 
     
