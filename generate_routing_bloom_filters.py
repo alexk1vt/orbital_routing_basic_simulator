@@ -16,7 +16,7 @@ orbit_cnt = 72
 
 # Adjacent satellite characterisitcs
 g_lat_range = 1 # satellites to E/W can fall within +- this value
-lateral_antenna_range = 30 #30
+lateral_antenna_range = 40 #30
 
 # Ground Station characteristics
 req_elev = 40 # https://www.reddit.com/r/Starlink/comments/i1ua2y/comment/g006krb/?utm_source=share&utm_medium=web2x
@@ -29,6 +29,13 @@ cur_time = 0
 num_sats = 0
 eph = None
 
+# Time variables
+time_scale = load.timescale()
+time_interval = 10 # interval between time increments, measured in seconds
+secs_per_km = 0.0000033
+num_time_intervals = 5
+cur_time_increment = 0
+
 # End of global variables
 
 
@@ -37,23 +44,29 @@ eph = None
 class SatRoutingNode:
     def __init__(self, _routing_sat, _index):
         self.routing_sat = _routing_sat
-        self.fore_neigh = sat_object_list[self.routing_sat.fore_sat_satnum]
-        self.aft_neigh = sat_object_list[self.routing_sat.aft_sat_satnum]
+        self.fore_neigh = None
+        self.aft_neigh = None
         self.succ_orbit_neigh = None
         self.prec_orbit_neigh = None
         self.all_neighs_found = False
         self.shortest_past_dict = {} # key: satnum, value: list of satnums in shortest path to satnum
         self.index = _index
 
-    def find_prec_succ_neighbors(self):
-        preceeding_orbit_satnum, _ = self.check_preceeding_orbit_sat_available()
-        succeeding_orbit_satnum, _ = self.check_succeeding_orbit_sat_available()
+    def find_fore_aft_neighbors(self):
+        self.fore_neigh = sat_routing_node_list[self.routing_sat.fore_sat_satnum]
+        self.aft_neigh = sat_routing_node_list[self.routing_sat.aft_sat_satnum] 
+
+    def find_prec_succ_neighbors(self, print_result = False):
+        preceeding_orbit_satnum, _ = self.routing_sat.check_preceeding_orbit_sat_available()
+        succeeding_orbit_satnum, _ = self.routing_sat.check_succeeding_orbit_sat_available()
         if not preceeding_orbit_satnum is None:
-            self.prec_orbit_neigh = sat_object_list[preceeding_orbit_satnum]    
+            self.prec_orbit_neigh = sat_routing_node_list[preceeding_orbit_satnum]    
         if not succeeding_orbit_satnum is None:
-            self.succ_orbit_neigh = sat_object_list[succeeding_orbit_satnum]
+            self.succ_orbit_neigh = sat_routing_node_list[succeeding_orbit_satnum]
         if not preceeding_orbit_satnum is None and not succeeding_orbit_satnum is None:
             self.all_neighs_found = True
+        if print_result:
+            print(f":: find_prec_succ_neighbors :: satnum: {self.index} :: prec_orbit_neigh: {preceeding_orbit_satnum} :: succ_orbit_neigh: {succeeding_orbit_satnum}")
 
     def find_shortest_path_to_all_sats(self):
         print(f":: find_shortest_path_to_all_sats :: satnum: {self.index}")
@@ -86,14 +99,18 @@ class SatRoutingNode:
         loop_cnt = 0
         while True:
             print(f"Pre-computing Dijsktra Hop - Loop count: {loop_cnt}", end="\r")
-            cur_node_neigh_list = [cur_node.fore_neigh, cur_node.aft_neigh, cur_node.prec_orbit_neigh, cur_node.succ_orbit_neigh]
+            cur_node_neigh_list = [cur_node.fore_neigh, cur_node.aft_neigh]
+            if not (cur_node.prec_orbit_neigh is None):
+                cur_node_neigh_list.append(cur_node.prec_orbit_neigh)
+            if not (cur_node.succ_orbit_neigh is None):
+                cur_node_neigh_list.append(cur_node.succ_orbit_neigh)
 
-            # Set distances for adjancent satellites
+            # Set distances for adjancent satellite nodes
             for testing_node in cur_node_neigh_list:
                 if not testing_node is None:
-                    if testing_node.sat.model.satnum in unvisted_node_dict:
-                        testing_sat_dist = 1 # just a single hop from current satellite to testing satellite
-                        tentative_dist = cur_node_dist + testing_sat_dist
+                    if testing_node.index in unvisted_node_dict:
+                        testing_node_dist = 1 # just a single hop from current satellite to testing satellite
+                        tentative_dist = cur_node_dist + testing_node_dist
                         if tentative_dist < unvisted_node_dict[testing_node.index][0]:
                             unvisted_node_dict[testing_node.index] = (tentative_dist, cur_node.index)
 
@@ -222,10 +239,10 @@ class RoutingSat:
         heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
         port_bearing = 270
         starboard_bearing = 90
-        port_range_min = port_bearing-int(lateral_antenna_range/2)
-        port_range_max = port_bearing+int(lateral_antenna_range/2)
-        starboard_range_min = starboard_bearing-int(lateral_antenna_range/2)
-        starboard_range_max = starboard_bearing+int(lateral_antenna_range/2)
+        port_range_min = (port_bearing-int(lateral_antenna_range/2)+360)%360
+        port_range_max = (port_bearing+int(lateral_antenna_range/2)+360)%360
+        starboard_range_min = (starboard_bearing-int(lateral_antenna_range/2)+360)%360
+        starboard_range_max = (starboard_bearing+int(lateral_antenna_range/2)+360)%360
         min_satnum = self.preceeding_orbit_number * sats_per_orbit
         max_satnum = min_satnum + sats_per_orbit
 
@@ -235,9 +252,11 @@ class RoutingSat:
             distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
             if distance > 1000:
                 continue  # Don't try to connect to lateral satellites with distances > 1000km - seems like an unreasonable ability 
-            if (port_range_min < test_sat_bearing) and (test_sat_bearing < port_range_max):
+            #if (port_range_min < test_sat_bearing) and (test_sat_bearing < port_range_max):
+            if (test_sat_bearing - port_range_min) %360 <= (port_range_max - port_range_min) % 360:
                 tentative_satnum_list.append((test_satnum, 'port'))
-            elif (starboard_range_min < test_sat_bearing) and (test_sat_bearing < starboard_range_max):
+            #elif (starboard_range_min < test_sat_bearing) and (test_sat_bearing < starboard_range_max):
+            elif (test_sat_bearing - starboard_range_min) %360 <= (starboard_range_max - starboard_range_min) % 360:
                 tentative_satnum_list.append((test_satnum, 'starboard'))
         if len(tentative_satnum_list) == 0:
             satnum = None
@@ -249,7 +268,6 @@ class RoutingSat:
             closest_satnum = None
             min_distance = float('inf') # Initialize minimum distance to infinity
             cur_routing_sat = sat_object_list[self.sat.model.satnum]
-            #print(f"Found {len(tentative_satnum_list)} sats in preceeding orbit")
             for test_satnum_int in tentative_satnum_list:
                 test_satnum, test_int = test_satnum_int
                 test_routing_sat = sat_object_list[test_satnum]
@@ -653,23 +671,42 @@ def increment_time():
     cur_time = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
     new_python_time = python_t + timedelta(seconds = time_interval+1)
     cur_time_next = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
+    print(f"::increment_time:: Time incremented to: {cur_time.utc_jpl()}")
 
 def set_time_interval(interval_seconds): # sets the time interval (in seconds)
     global time_interval
     time_interval = interval_seconds
 
 def find_all_sat_routing_node_neighbors():
+    print(f"::find_all_sat_routing_node_neighbors:: Finding fore/aft neigbors")
+    for routing_node in sat_routing_node_list: # quickly generate the fore/aft node neighbors
+        routing_node.find_fore_aft_neighbors()
+
+    print(f"::find_all_sat_routing_node_neighbors:: Finding succeeding/preceeding orbit neighbors")
+    num_nodes = len(sat_routing_node_list)
     all_neighs_found = False
+    print_result = False
+    max_attempts = floor(180 / (time_interval/60)) # 3 hours worth of attempts - two LEO orbits worth of time
+    attempts = 0
     while all_neighs_found == False:
+        missing_neighs_cnt = 0
         all_neighs_found = True
-        for routing_node in sat_routing_node_list:
+        for routing_node in sat_routing_node_list:  # I can probably parallelize this...
             if routing_node.all_neighs_found == False:
-                routing_node.find_prec_succ_neighbors()
+                routing_node.find_prec_succ_neighbors(print_result)
                 if routing_node.all_neighs_found == False:
                     all_neighs_found = False
+                    missing_neighs_cnt += 1
         if not all_neighs_found:
-            print("Could not find all neighbors.  Trying again...")
+            print(f"::find_all_sat_routing_node_neighbors:: Could not find all neighbors for {missing_neighs_cnt} of {num_nodes} nodes.  {attempts} out of {max_attempts} Trying again...")
             increment_time()
+            #if missing_neighs_cnt < 100:
+            #    print_result = True
+            attempts += 1
+        if attempts > max_attempts:
+            print(f"::find_all_sat_routing_node_neighbors:: Could not find all neighbors for {missing_neighs_cnt} of {num_nodes} nodes after {max_attempts} attempts.  Exiting...")
+            return False
+    return True
 
 def build_sat_routing_node_list():
     for satnum in range(len(sat_object_list)):
@@ -682,14 +719,13 @@ def write_all_shortest_paths_to_file():
         csvwriter = csv.writer(csvfile)
         csvwriter.writerow(fields)
         for node in sat_routing_node_list:
+            print(f"::write_all_shortest_paths_to_file:: Writing shortest paths for node {node.index}", end="\r")
             for dest_satnum in range(len(sat_object_list)):
                 path_list = node.shortest_path_dict[dest_satnum]
                 if path_list == None:
                     continue
                 row = [node.index, dest_satnum] + path_list
                 csvwriter.writerow(row)
-
-set_time_interval(interval_seconds)
 
 def main ():
     # ---------- SETUP ------------
@@ -711,19 +747,24 @@ def main ():
     set_time_interval(600) # setting time interval to 10 minutes
 
     # Create a list of satellite objects
+    print(f"Building constellation...")
     build_constellation(source_sat)
 
     # Create a list of routing nodes
+    print(f"Building routing nodes...")
     build_sat_routing_node_list()
 
     # Find all neighbors for each routing node
+    print(f"Finding all neighbors...")
     find_all_sat_routing_node_neighbors()
 
     # Find shortest paths between all pairs of routing nodes
-    for node in sat_routing_node_list:
+    print(f"Finding shortest paths...")
+    for node in sat_routing_node_list:  # I think I should parellelize this...
         node.find_shortest_path_to_all_sats()
 
     # Write all shortest paths to file
+    print(f"Writing shortest paths to file...")
     write_all_shortest_paths_to_file()
 
 if __name__ == "__main__":
