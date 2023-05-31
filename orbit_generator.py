@@ -103,8 +103,10 @@ class RoutingSat:
         self.aft_sat_satnum = _aft_sat_index
         self.port_sat_satnum = None
         self.starboard_sat_satnum = None
-        #self.xmt_qu = []  # these are the send/receive queues - their contents depend on the routing algorithm being used
-        #self.rcv_qu = []
+        self.aft_port_sat_satnum = None
+        self.fore_port_sat_satnum = None
+        self.aft_starboard_sat_satnum = None
+        self.fore_starboard_sat_satnum = None
         self.packet_qu = []
         self.packets_sent_cnt = 0 # the number of packets sent in the current time interval
         self.neigh_state_dict = {}  # key: satnum, value is link_state dictionary:
@@ -115,8 +117,12 @@ class RoutingSat:
                                                                         #  link-congested: (True/False)} - neigh setting
         self.fore_int_up = True
         self.aft_int_up = True
+        self.fore_port_int_up = True
+        self.aft_port_int_up = True
         self.port_int_up = True
         self.starboard_int_up = True
+        self.fore_starboard_int_up = True
+        self.aft_starboard_int_up = True
         self.heading = None # ensure this is referenced only when you know it has been set for the current time
         self.congestion_cnt = 0
 
@@ -280,101 +286,68 @@ class RoutingSat:
             return True
         return False
     
-    def check_preceeding_orbit_sat_available(self): # returns satnum if sat is within range (None otherwise).  If satnum is other than None, interface will indicate which ('port'/'starboard')
+    def check_neighboring_orbit_sat_available(self, neighboring_orbit_num): # returns satnum if sat is within range (None otherwise).  If satnum is other than None, interface will indicate which ('port'/'starboard')
+        interfaces = ['fore_port', 'fore_starboard', 'aft_port', 'aft_starboard']
+        neighboring_satnum_list = []
+        # get our bearings
         heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
-        port_bearing = 270
-        starboard_bearing = 90
-        port_range_min = port_bearing-int(lateral_antenna_range/2)
-        port_range_max = port_bearing+int(lateral_antenna_range/2)
-        starboard_range_min = starboard_bearing-int(lateral_antenna_range/2)
-        starboard_range_max = starboard_bearing+int(lateral_antenna_range/2)
-        min_satnum = self.preceeding_orbit_number * sats_per_orbit
+        fore_port_bearing = 45
+        fore_starboard_bearing = 315
+        aft_port_bearing = 135
+        aft_starboard_bearing = 225
+        # find min/max for each interface
+        fore_port_range_min = fore_port_bearing-int(lateral_antenna_range/2)
+        fore_port_range_max = fore_port_bearing+int(lateral_antenna_range/2)
+        fore_starboard_range_min = fore_starboard_bearing-int(lateral_antenna_range/2)
+        fore_starboard_range_max = fore_starboard_bearing+int(lateral_antenna_range/2)
+        aft_port_range_min = aft_port_bearing-int(lateral_antenna_range/2)
+        aft_port_range_max = aft_port_bearing+int(lateral_antenna_range/2)
+        aft_starboard_range_min = aft_starboard_bearing-int(lateral_antenna_range/2)
+        aft_starboard_range_max = aft_starboard_bearing+int(lateral_antenna_range/2)
+        # find min/max satnums for target orbit
+        min_satnum = neighboring_orbit_num * sats_per_orbit
         max_satnum = min_satnum + sats_per_orbit
 
+        # loop through neighboring orbit satellites and find which are within range of each interface
         tentative_satnum_list = []
         for test_satnum in range(min_satnum, max_satnum):
             test_sat_bearing = get_rel_bearing_by_satnum_degrees(self.sat.model.satnum, test_satnum, heading)
             distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
             if distance > 1000:
                 continue  # Don't try to connect to lateral satellites with distances > 1000km - seems like an unreasonable ability 
-            if (port_range_min < test_sat_bearing) and (test_sat_bearing < port_range_max):
-                tentative_satnum_list.append((test_satnum, 'port'))
-            elif (starboard_range_min < test_sat_bearing) and (test_sat_bearing < starboard_range_max):
-                tentative_satnum_list.append((test_satnum, 'starboard'))
-        if len(tentative_satnum_list) == 0:
-            satnum = None
-            interface = None
-        elif len(tentative_satnum_list) == 1:
-            satnum = tentative_satnum_list[0][0]
-            interface = tentative_satnum_list[0][1]
-        else:
-            closest_satnum = None
-            min_distance = float('inf') # Initialize minimum distance to infinity
-            cur_routing_sat = get_routing_sat_obj_by_satnum(self.sat.model.satnum)
-            #print(f"Found {len(tentative_satnum_list)} sats in preceeding orbit")
-            for test_satnum_int in tentative_satnum_list:
-                test_satnum, test_int = test_satnum_int
-                test_routing_sat = get_routing_sat_obj_by_satnum(test_satnum)
-                # Calculate the straight-line distance between the input satellite and each satellite in the list
-                sat_diff = cur_routing_sat.sat.at(cur_time) - test_routing_sat.sat.at(cur_time)
-                # Update the closest satellite and minimum distance if a new minimum is found
-                if sat_diff.distance().km < min_distance:
-                    closest_satnum = test_routing_sat.sat.model.satnum
-                    closest_int = test_int
-                    min_distance = sat_diff.distance().km
-            satnum = closest_satnum
-            interface = closest_int
-        return satnum, interface
+            if (test_sat_bearing - fore_port_range_min) % 360 <= (fore_port_range_max - fore_port_range_min) % 360:
+                tentative_satnum_list.append((test_satnum, 'fore_port'))
+            elif (test_sat_bearing - fore_starboard_range_min) % 360 <= (fore_starboard_range_max - fore_starboard_range_min) % 360:
+                tentative_satnum_list.append((test_satnum, 'fore_starboard'))
+            elif (test_sat_bearing - aft_port_range_min) % 360 <= (aft_port_range_max - aft_port_range_min) % 360:
+                tentative_satnum_list.append((test_satnum, 'aft_port'))
+            elif (test_sat_bearing - aft_starboard_range_min) % 360 <= (aft_starboard_range_max - aft_starboard_range_min) % 360:
+                tentative_satnum_list.append((test_satnum, 'aft_starboard'))
+        
+        # find closest satellite for each interface and append to neighboring_satnum_list
+        for interface in interfaces:
+            for tentative_tuple in tentative_satnum_list:
+                interface_list = []
+                if interface in tentative_tuple:
+                    if tentative_tuple[1] == interface:
+                        interface_list.append(tentative_tuple[0])
+            if len(interface_list) == 0:
+                continue
+            elif len(interface_list) == 1:
+                neighboring_satnum_list.append((interface_list[0], interface))
+            else:
+                closest_satnum = None
+                min_distance = float('inf')
+                for test_satnum in interface_list:
+                    distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
+                    if distance < min_distance:
+                        closest_satnum = test_satnum
+                        min_distance = distance
+                neighboring_satnum_list.append((closest_satnum, interface))
+        
+        return neighboring_satnum_list
 
-    def check_succeeding_orbit_sat_available(self): # returns satnum if sat is within range (None otherwise).  If satnum is other than None, interface will indicate which ('port'/'starboard')
-        heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
-        port_bearing = 270
-        starboard_bearing = 90
-        port_range_min = port_bearing-int(lateral_antenna_range/2)
-        port_range_max = port_bearing+int(lateral_antenna_range/2)
-        starboard_range_min = starboard_bearing-int(lateral_antenna_range/2)
-        starboard_range_max = starboard_bearing+int(lateral_antenna_range/2)
-        min_satnum = self.succeeding_orbit_number * sats_per_orbit
-        max_satnum = min_satnum + sats_per_orbit
-
-        tentative_satnum_list = []
-        for test_satnum in range(min_satnum, max_satnum):
-            test_sat_bearing = get_rel_bearing_by_satnum_degrees(self.sat.model.satnum, test_satnum, heading)
-            distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
-            if distance > 1000:
-                continue  # Don't try to connect to lateral satellites with distances > 1000km - seems like an unreasonable ability
-            if (port_range_min < test_sat_bearing) and (test_sat_bearing < port_range_max):
-                tentative_satnum_list.append((test_satnum, 'port'))
-            elif (starboard_range_min < test_sat_bearing) and (test_sat_bearing < starboard_range_max):
-                tentative_satnum_list.append((test_satnum, 'starboard'))
-        if len(tentative_satnum_list) == 0:
-            satnum = None
-            interface = None
-        elif len(tentative_satnum_list) == 1:
-            satnum = tentative_satnum_list[0][0]
-            interface = tentative_satnum_list[0][1]
-        else:
-            closest_satnum = None
-            min_distance = float('inf') # Initialize minimum distance to infinity
-            cur_routing_sat = get_routing_sat_obj_by_satnum(self.sat.model.satnum)
-            #print(f"Found {len(tentative_satnum_list)} sats in succeeding orbit")
-            for test_satnum_int in tentative_satnum_list:
-                test_satnum, test_int = test_satnum_int
-                test_routing_sat = get_routing_sat_obj_by_satnum(test_satnum)
-                # Calculate the straight-line distance between the input satellite and each satellite in the list
-                sat_diff = cur_routing_sat.sat.at(cur_time) - test_routing_sat.sat.at(cur_time)
-                # Update the closest satellite and minimum distance if a new minimum is found
-                if sat_diff.distance().km < min_distance:
-                    closest_satnum = test_routing_sat.sat.model.satnum
-                    closest_int = test_int
-                    min_distance = sat_diff.distance().km
-            satnum = closest_satnum
-            interface = closest_int
-        return satnum, interface
-
-    def check_succeeding_orbit(self):
-        pass
-
+    """
     def get_sat_East(self, lat_range = g_lat_range):
         #range of satnums for target orbit
         min_satnum = self.succeeding_orbit_number * sats_per_orbit
@@ -398,7 +371,8 @@ class RoutingSat:
             closest_sat_East = routing_sat_list[0]
             
         return closest_sat_East
-
+    """
+    """
     def get_sat_West(self, lat_range = g_lat_range):
         #range of satnums for target orbit
         min_satnum = self.preceeding_orbit_number * sats_per_orbit
@@ -422,7 +396,8 @@ class RoutingSat:
             closest_sat_West = routing_sat_list[0]
             
         return closest_sat_West
-
+    """
+    """
     def get_sat_North(self):
         first_target_satnum = self.satnum - 1
         second_target_satnum = self.satnum + 1
@@ -447,13 +422,13 @@ class RoutingSat:
 
             return None
         return sat_object_list[target_satnum]
-
+    """
     def get_fore_sat(self):
         return sat_object_list[self.fore_sat_satnum] # fore satellite never changes
     
     def get_aft_sat(self):
         return sat_object_list[self.aft_sat_satnum] # aft satellite never changes
-
+    """
     def get_sat_South(self):
         first_target_satnum = self.satnum - 1
         second_target_satnum = self.satnum + 1
@@ -477,7 +452,8 @@ class RoutingSat:
         if target_lat.degrees > self_lat.degrees:
             return None
         return sat_object_list[target_satnum]
-    
+    """
+
     def find_cur_pos_diff(self, route_sat2):
         sat1_vec = self.sat.at(cur_time)
         sat2_vec = route_sat2.sat.at(cur_time)
@@ -501,21 +477,9 @@ class RoutingSat:
 
     # returns satnum of next hop satellite, or None if no next hop satellite is available
     def find_next_link_state_hop(self, dest_gs): 
-        # first find which sats, if any, are on each interface
-        self.port_sat_satnum = None
-        self.starboard_sat_satnum = None
-        preceeding_orbit_satnum, preceeding_orbit_int = self.check_preceeding_orbit_sat_available()
-        succeeding_orbit_satnum, succeeding_orbit_int = self.check_succeeding_orbit_sat_available()
-        if not preceeding_orbit_satnum is None:
-            if preceeding_orbit_int == 'port':
-                self.port_sat_satnum = preceeding_orbit_satnum
-            else:
-                self.starboard_sat_satnum = preceeding_orbit_satnum
-        if not succeeding_orbit_satnum is None:
-            if succeeding_orbit_int == 'port':
-                self.port_sat_satnum = succeeding_orbit_satnum
-            else:
-                self.starboard_sat_satnum = succeeding_orbit_satnum
+        # update current neighboring satellites on each interface
+        self.update_current_neighbor_sats()
+        
         avail_neigh_routing_sats = []
         if self.fore_int_up:
             avail_neigh_routing_sats.append(sat_object_list[self.fore_sat_satnum])
@@ -525,6 +489,15 @@ class RoutingSat:
             avail_neigh_routing_sats.append(sat_object_list[self.port_sat_satnum])
         if self.starboard_int_up and (not self.starboard_sat_satnum is None):
             avail_neigh_routing_sats.append(sat_object_list[self.starboard_sat_satnum])
+        if self.fore_port_int_up and (not self.fore_port_sat_satnum is None):
+            avail_neigh_routing_sats.append(sat_object_list[self.fore_port_sat_satnum])
+        if self.fore_starboard_int_up and (not self.fore_starboard_sat_satnum is None):
+            avail_neigh_routing_sats.append(sat_object_list[self.fore_starboard_sat_satnum])
+        if self.aft_port_int_up and (not self.aft_port_sat_satnum is None):
+            avail_neigh_routing_sats.append(sat_object_list[self.aft_port_sat_satnum])
+        if self.aft_starboard_int_up and (not self.aft_starboard_sat_satnum is None):
+            avail_neigh_routing_sats.append(sat_object_list[self.aft_starboard_sat_satnum])
+            
 
         # now find which of the available neighbor routing sats is closest to the destination gs
         self.heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
@@ -540,13 +513,8 @@ class RoutingSat:
             return None
         return nearest_neigh_routing_sat.sat.model.satnum
 
-    # calculate the distance metric for link state routing protocol    
-    # using: destination bearing, satellite bandwidth, whether congested, and whether recently down
-    def calc_link_state_dist_metric(self, neigh_routing_sat, dest_gs, bearing_only = False):
-        # first check if neighbor routing sat is in neighbor state dict
-        if not neigh_routing_sat.sat.model.satnum in self.neigh_state_dict:
-            return 0
-        # now find bearing of destination gs
+    def calc_bearing_dist_metric(self, neigh_routing_sat, dest_gs):
+        # find bearing of destination gs
         dest_bearing = self.get_rel_bearing_to_dest_gs(dest_gs)
         # assign values to each interface based on dest_bearing
         neigh_sat_interface = self.neigh_state_dict[neigh_routing_sat.sat.model.satnum]['interface_name']
@@ -558,10 +526,19 @@ class RoutingSat:
             neigh_sat_interface_bearing = 270
         elif neigh_sat_interface == 'starboard':
             neigh_sat_interface_bearing = 90
+        elif neigh_sat_interface == 'fore_port':
+            neigh_sat_interface_bearing = 315
+        elif neigh_sat_interface == 'fore_starboard':
+            neigh_sat_interface_bearing = 45
+        elif neigh_sat_interface == 'aft_port':
+            neigh_sat_interface_bearing = 225
+        elif neigh_sat_interface == 'aft_starboard':
+            neigh_sat_interface_bearing = 135
         else:
             print(f"Neighbor sat interface: {neigh_sat_interface} not recognized, aborting")
             exit()
-        # calculate distance metric for neighbor satellite bearing
+
+        # calculate max/min for each interface metric (correct, lateral_plus, lateral, lateral_minus, incorrect)
         interface_correct_lower_range = (neigh_sat_interface_bearing - (interface_correct_range/2) + 360) % 360
         interface_correct_upper_range = (neigh_sat_interface_bearing + (interface_correct_range/2) + 360) % 360
         interface_lateral_plus_lower_range = (neigh_sat_interface_bearing - (interface_lateral_range/4) + 360) % 360
@@ -570,6 +547,7 @@ class RoutingSat:
         interface_lateral_upper_range = (neigh_sat_interface_bearing + (interface_lateral_range/2) + 360) % 360
         interface_lateral_minus_lower_range = (neigh_sat_interface_bearing - (interface_lateral_range/1.5) + 360) % 360
         interface_lateral_minus_upper_range = (neigh_sat_interface_bearing + (interface_lateral_range/1.5) + 360) % 360
+        # test dest_bearing against each interface range and assign value to each interface metric (correct, lateral_plus, lateral, lateral_minus, incorrect)
         if (dest_bearing - interface_correct_lower_range) %360 <= (interface_correct_upper_range - interface_correct_lower_range) % 360:
             bearing_metric = interface_dir_correct
         elif (dest_bearing - interface_lateral_plus_lower_range) %360 <= (interface_lateral_plus_upper_range - interface_lateral_plus_lower_range) % 360:
@@ -581,11 +559,24 @@ class RoutingSat:
         else:
             bearing_metric = interface_dir_incorrect
         
+        return bearing_metric
+
+
+    # calculate the distance metric for link state routing protocol    
+    # using: destination bearing, satellite bandwidth, whether congested, and whether recently down
+    def calc_link_state_dist_metric(self, neigh_routing_sat, dest_gs, bearing_only = False):
+        # first check if neighbor routing sat is in neighbor state dict
+        if not neigh_routing_sat.sat.model.satnum in self.neigh_state_dict:
+            return 0
+        
+        bearing_metric = self.calc_bearing_dist_metric(neigh_routing_sat, dest_gs)
+        
         if bearing_only:
             return bearing_metric
         
         # calculate distance metric for neighbor satellite bandwidth based on which interface it is
         # if neighbor sat is for/aft, it has good bandwidth
+        neigh_sat_interface = self.neigh_state_dict[neigh_routing_sat.sat.model.satnum]['interface_name']
         if (neigh_sat_interface == 'fore') or (neigh_sat_interface == 'aft'):
             bandwidth_metric = interface_bandwidth_high 
         else:
@@ -654,23 +645,49 @@ class RoutingSat:
         rel_bearing = (rel_bearing + 360) % 360
 
         return rel_bearing
-    # update the state of links to all direct neighbor sats
-    def update_neigh_state(self, congestion = None):
-        # find which, if any, sats are port/starboard neighbors
+
+    def update_current_neighbor_sats(self):
+        # first find which sats, if any, are on each interface
         self.port_sat_satnum = None
         self.starboard_sat_satnum = None
-        preceeding_orbit_satnum, preceeding_orbit_int = self.check_preceeding_orbit_sat_available()
-        succeeding_orbit_satnum, succeeding_orbit_int = self.check_succeeding_orbit_sat_available()
-        if not preceeding_orbit_satnum is None:
-            if preceeding_orbit_int == 'port':
-                self.port_sat_satnum = preceeding_orbit_satnum
-            else:
-                self.starboard_sat_satnum = preceeding_orbit_satnum
-        if not succeeding_orbit_satnum is None:
-            if succeeding_orbit_int == 'port':
-                self.port_sat_satnum = succeeding_orbit_satnum
-            else:
-                self.starboard_sat_satnum = succeeding_orbit_satnum
+        preceeding_orbit_satnum_list = self.check_neighboring_orbit_sat_available(self.preceeding_orbit_number)
+        succeeding_orbit_satnum_list = self.check_neighboring_orbit_sat_available(self.succeeding_orbit_number)
+        # _orbit_satnum_list has format [(satnum, interface), ...]
+        # possible interfaces: 'fore_port', 'fore_starboard', 'aft_port', 'aft_starboard'
+        if len(preceeding_orbit_satnum_list) > 0:
+            for satnum_tuple in preceeding_orbit_satnum_list:
+                if satnum_tuple[1] == 'port':
+                    self.port_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'starboard':
+                    self.starboard_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'fore_port':
+                    self.fore_port_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'fore_starboard':
+                    self.fore_starboard_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'aft_port':
+                    self.aft_port_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'aft_starboard':
+                    self.aft_starboard_sat_satnum = satnum_tuple[0]
+        if len(succeeding_orbit_satnum_list) > 0:
+            for satnum_tuple in succeeding_orbit_satnum_list:
+                if satnum_tuple[1] == 'port':
+                    self.port_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'starboard':
+                    self.starboard_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'fore_port':
+                    self.fore_port_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'fore_starboard':
+                    self.fore_starboard_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'aft_port':
+                    self.aft_port_sat_satnum = satnum_tuple[0]
+                elif satnum_tuple[1] == 'aft_starboard':
+                    self.aft_starboard_sat_satnum = satnum_tuple[0]
+
+    # update the state of links to all direct neighbor sats
+    def publish_state_to_neighbors(self, congestion = None):
+        # update current neighboring satellites on each interface
+        self.update_current_neighbor_sats()
+
         # build list of neighbor sats to update
         neigh_routing_sat_list = []
         if self.fore_int_up:
@@ -681,7 +698,7 @@ class RoutingSat:
             neigh_routing_sat_list.append(sat_object_list[self.port_sat_satnum])
         if self.starboard_int_up and (not self.starboard_sat_satnum is None):
             neigh_routing_sat_list.append(sat_object_list[self.starboard_sat_satnum])
-        # check if satellite is congested - should this be based on _link congestion_ rather than satellite congestion?
+        # check if current satellite is congested - should this be based on _link congestion_ rather than satellite congestion?
         if congestion is None:
             if len(self.packet_qu) > int((packet_bandwidth_per_sec * time_interval) * .8):  # are we at 80% of our packet queue capacity?
                 congestion_status = True
@@ -689,17 +706,30 @@ class RoutingSat:
                 congestion_status = False
         else:
             congestion_status = congestion
+            
         # update link state for all available neighbors
         neigh_congested, neigh_connection_down = self.check_internal_link_status()
+        interface = None
         for neigh_routing_sat in neigh_routing_sat_list:
             if (neigh_routing_sat.sat.model.satnum == self.fore_sat_satnum):  # designate the interface this satellite is on (note - neighbor satellite interface is the opposite of the current satellite interface [ie, port int talks to starboard int, etc...])
-                    interface = 'aft'
+                interface = 'aft'
             elif (neigh_routing_sat.sat.model.satnum == self.aft_sat_satnum):
-                    interface = 'fore'
+                interface = 'fore'
+            elif (neigh_routing_sat.sat.model.satnum == self.starboard_sat_satnum):
+                interface = 'starboard'
             elif (neigh_routing_sat.sat.model.satnum == self.port_sat_satnum):
-                    interface = 'starboard'
-            else:
-                    interface = 'port'
+                interface = 'port'
+            elif (neigh_routing_sat.sat.model.satnum == self.fore_port_sat_satnum):
+                interface = 'fore_port'
+            elif (neigh_routing_sat.sat.model.satnum == self.fore_starboard_sat_satnum):
+                interface = 'fore_starboard'
+            elif (neigh_routing_sat.sat.model.satnum == self.aft_port_sat_satnum):
+                interface = 'aft_port'
+            elif (neigh_routing_sat.sat.model.satnum == self.aft_starboard_sat_satnum):
+                interface = 'aft_starboard'
+            if interface is None:
+                print(f"publish_state_to_neighbors: interface is None, aborting")
+                exit()
             if not self.sat.model.satnum in neigh_routing_sat.neigh_state_dict:  
                 # first entry into this neigh_state_dict, so initialize all the link state variables for this sat
                 neigh_routing_sat.neigh_state_dict[self.sat.model.satnum] = {'interface_name': interface, 'connection_up': True, 'last_recv_status': cur_time, 'connection_last_down': None, 'is_congested': congestion_status, 'has_neigh_connection_down' : neigh_connection_down, 'has_neigh_congested' : neigh_congested}
@@ -722,6 +752,27 @@ class RoutingSat:
                 neigh_connection_down = True
         return neigh_congested, neigh_connection_down
 
+    def get_list_of_cur_sat_neighbors(self):
+        self.update_current_neighbor_sats()
+        cur_sat_neigh_list = []
+        if self.fore_int_up:
+            cur_sat_neigh_list.append(sat_object_list[self.fore_sat_satnum])
+        if self.aft_int_up:
+            cur_sat_neigh_list.append(sat_object_list[self.aft_sat_satnum])
+        if self.port_int_up and self.port_sat_satnum is not None:
+            cur_sat_neigh_list.append(sat_object_list[self.port_sat_satnum])
+        if self.starboard_int_up and self.starboard_sat_satnum is not None:
+            cur_sat_neigh_list.append(sat_object_list[self.starboard_sat_satnum])
+        if self.fore_port_int_up and self.fore_port_satnum is not None:
+            cur_sat_neigh_list.append(sat_object_list[self.fore_port_satnum])
+        if self.aft_port_int_up and self.aft_port_satnum is not None:
+            cur_sat_neigh_list.append(sat_object_list[self.aft_port_satnum])
+        if self.fore_starboard_int_up and self.fore_starboard_satnum is not None:
+            cur_sat_neigh_list.append(sat_object_list[self.fore_starboard_satnum])
+        if self.aft_starboard_int_up and self.aft_starboard_satnum is not None:
+            cur_sat_neigh_list.append(sat_object_list[self.aft_starboard_satnum])
+        return cur_sat_neigh_list
+
 # End Routing sat class
 
 ## :: General Functions ::
@@ -733,17 +784,17 @@ class RoutingSat:
                                         #  neigh_last_down:  (time),  - self setting
                                         #  neigh_congested: (True/False)} - neigh setting
 
-# multi-threaded version of update_neigh_state()
-def mt_publish_state_to_neigh(thread_num):
+# multi-threaded version of publish_state_to_neighbors()
+def mt_publish_state_to_neighbors(thread_num):
     sat_object_range = floor(len(sat_object_list) / num_threads)
     start = thread_num * sat_object_range
     end = start + sat_object_range
     if thread_num == num_threads - 1:
         end = len(sat_object_list)
-    print(f"::mt_update_neigh_state() :: thread {thread_num} : publishing states to neighbors from {start} to {end}", end='\r')
+    print(f"::mt_update_neigh_state():: thread {thread_num} : publishing states to neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
-        r_sat.update_neigh_state()
-    print(f"::mt_update_neigh_state() :: thread {thread_num} : finished publishing states to neighbors", end='\r')
+        r_sat.publish_state_to_neighbors()
+    print(f"::mt_update_neigh_state():: thread {thread_num} : finished publishing states to neighbors", end='\r')
 
 def mt_update_neigh_state_table(thread_num):
     sat_object_range = floor(len(sat_object_list) / num_threads)
@@ -751,9 +802,13 @@ def mt_update_neigh_state_table(thread_num):
     end = start + sat_object_range
     if thread_num == num_threads - 1:
         end = len(sat_object_list)
-    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : updating internal states of neighbors from {start} to {end}", end='\r')
+    print(f"::mt_update_neigh_state_table():: thread {thread_num} : updating internal states of neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
-        for satnum in r_sat.neigh_state_dict: # now update internal link states
+        update_neigh_state_table(r_sat)
+    print(f"::mt_update_neigh_state_table():: thread {thread_num} : finished updating internal neighbor state table", end='\r')
+
+def update_neigh_state_table(r_sat):
+    for satnum in r_sat.neigh_state_dict: # now update internal link states
             last_neigh_status = r_sat.neigh_state_dict[satnum]['last_recv_status']
             if last_neigh_status != cur_time:
                 r_sat.neigh_state_dict[satnum]['connection_up'] = False
@@ -762,7 +817,6 @@ def mt_update_neigh_state_table(thread_num):
                 r_sat.neigh_state_dict[satnum]['connection_up'] = True
                 if old_link_status == False:
                     r_sat.neigh_state_dict[satnum]['connection_last_down'] = cur_time
-    print(f"::mt_update_neigh_state_table() :: thread {thread_num} : finished updating internal neighbor state table", end='\r')
 
 def all_sats_update_neigh_state():
     print("::all_sats_update_neigh_state() :: publishing states to neighbors")
@@ -770,7 +824,7 @@ def all_sats_update_neigh_state():
     if do_multithreading:
         thread_list = []
         for index in range(num_threads):
-            thread = threading.Thread(target=mt_publish_state_to_neigh, args=(index,))
+            thread = threading.Thread(target=mt_publish_state_to_neighbors, args=(index,))
             thread.start()
             thread_list.append(thread)
         for thread in thread_list:
@@ -778,7 +832,7 @@ def all_sats_update_neigh_state():
     else:
         for r_sat in sat_object_list:
             print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
-            r_sat.update_neigh_state() 
+            r_sat.publish_state_to_neighbors() 
     print("\n::all_sats_update_neigh_state() :: updating internal states of neighbors")
     # now update those link states internally
     if do_multithreading:
@@ -792,15 +846,7 @@ def all_sats_update_neigh_state():
     else:
         for r_sat in sat_object_list:
             print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
-            for satnum in r_sat.neigh_state_dict:
-                last_neigh_status = r_sat.neigh_state_dict[satnum]['last_recv_status']
-                if last_neigh_status != cur_time:
-                    r_sat.neigh_state_dict[satnum]['connection_up'] = False
-                else:
-                    old_link_status = r_sat.neigh_state_dict[satnum]['connection_up']
-                    r_sat.neigh_state_dict[satnum]['connection_up'] = True
-                    if old_link_status == False:
-                        r_sat.neigh_state_dict[satnum]['connection_last_down'] = cur_time
+            update_neigh_state_table(r_sat)
         print("\n")
 
 def add_to_packet_qu_by_satnum(target_satnum, packet):
@@ -881,7 +927,6 @@ def correct_BSTAR_string(Drag_coef):  # trying to match format listed in: https:
     Corr_drag_coef = str(_float_drag_coef) + 'e-' + _drag_coef_power
     return Corr_drag_coef
     #Corr_drag_coef = _coeff_drag_coef * pow(10, _drag_coef_power)
-
 
 def correct_BSTAR_float(Drag_coef):
     _str_drag_coef = str(Drag_coef)
@@ -1202,7 +1247,7 @@ def test_circumnavigate():
 
     draw_static_plot(test_list, f"Go East, Northx2, West - {len(test_list)} sats")
 
-def find_route_random(src, dest):
+def find_route_random(src, dest): # NOTE: Currently non-functional - need to update !!!
     # Find satellite at least 60 deg above the horizon at source
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(src)):
@@ -1256,10 +1301,10 @@ def find_route_dijkstra_dist(src, dest):
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(src)):
-            topo_position = (r_sat.sat - src).at(cur_time)
-            alt, az, dist = topo_position.altaz()    
-            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at source')
-            print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
+            #topo_position = (r_sat.sat - src).at(cur_time)
+            #alt, az, dist = topo_position.altaz()    
+            #print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at source')
+            #print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
             break # Just go with first satellite
     if not sat_found:
@@ -1271,10 +1316,10 @@ def find_route_dijkstra_dist(src, dest):
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(dest)):
-            topo_position = (r_sat.sat - dest).at(cur_time)
-            alt, az, dist = topo_position.altaz()    
-            print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at destination')
-            print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
+            #topo_position = (r_sat.sat - dest).at(cur_time)
+            #alt, az, dist = topo_position.altaz()    
+            #print(f'Satellite {r_sat.sat.model.satnum} is at least 30deg off horizon at destination')
+            #print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
             break # Just go with first satellite
     if not sat_found:
@@ -1302,16 +1347,8 @@ def find_route_dijkstra_dist(src, dest):
     while True:
         print(f"Loop count: {loop_cnt}", end="\r")
         
-        neigh_fore = cur_sat.get_fore_sat()
-        neigh_aft = cur_sat.get_aft_sat()
-        neigh_preceeding_orbit_satnum, _ = cur_sat.check_preceeding_orbit_sat_available()
-        neigh_succeeding_orbit_satnum, _ = cur_sat.check_succeeding_orbit_sat_available()
-        if neigh_preceeding_orbit_satnum is None: neigh_preceeding_orbit = None
-        else: neigh_preceeding_orbit = get_routing_sat_obj_by_satnum(neigh_preceeding_orbit_satnum)
-        if neigh_succeeding_orbit_satnum is None: neigh_succeeding_orbit = None
-        else: neigh_succeeding_orbit = get_routing_sat_obj_by_satnum(neigh_succeeding_orbit_satnum)
-
-        cur_sat_neigh_list = [neigh_fore, neigh_aft, neigh_preceeding_orbit, neigh_succeeding_orbit]
+        # Get neighbors of current satellite
+        cur_sat_neigh_list = cur_sat.get_list_of_cur_sat_neighbors()
 
         # Set distances for adjancent satellites
         for testing_sat in cur_sat_neigh_list:
@@ -1388,7 +1425,8 @@ def find_route_dijkstra_dist(src, dest):
     #draw_static_plot(traverse_list, [dest, src], title=f'Planned Dijkstra Distance: {len(traverse_list)} hops, {int(link_distance)}km distance', draw_lines = True, draw_sphere = True)
     # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
     packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest}
-    send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
+    if send_directed_routing_packet_from_source(traverse_list[-1], src, packet) == -1
+        num_packets_dropped += 1
     
 def find_route_dijkstra_hop(src, dest):
     print("Starting Dijkstra hop routing")
@@ -1397,8 +1435,8 @@ def find_route_dijkstra_hop(src, dest):
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(src)):
-            topo_position = (r_sat.sat - src).at(cur_time)
-            alt, az, dist = topo_position.altaz()    
+            #topo_position = (r_sat.sat - src).at(cur_time)
+            #alt, az, dist = topo_position.altaz()    
             #print(f'Satellite {r_sat.sat.model.satnum} is at least {req_elev}deg off horizon at source')
             #print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
@@ -1411,8 +1449,8 @@ def find_route_dijkstra_hop(src, dest):
     sat_found = False
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(dest)):
-            topo_position = (r_sat.sat - dest).at(cur_time)
-            alt, az, dist = topo_position.altaz()    
+            #topo_position = (r_sat.sat - dest).at(cur_time)
+            #alt, az, dist = topo_position.altaz()    
             #print(f'Satellite {r_sat.sat.model.satnum} is at least {req_elev}deg off horizon at destination')
             #print(f'\tElevation: {alt.degrees}\n\tAzimuth: {az}\n\tDistance: {dist.km:.1f}km')
             sat_found = True
@@ -1440,23 +1478,12 @@ def find_route_dijkstra_hop(src, dest):
     print("Starting Dijsktra Loop")
     while True:
         print(f"Loop count: {loop_cnt}", end="\r")
-        
-        neigh_fore = cur_sat.get_fore_sat()
-        neigh_aft = cur_sat.get_aft_sat()
-        neigh_preceeding_orbit_satnum, _ = cur_sat.check_preceeding_orbit_sat_available()
-        neigh_succeeding_orbit_satnum, _ = cur_sat.check_succeeding_orbit_sat_available()
-        if neigh_preceeding_orbit_satnum is None: neigh_preceeding_orbit = None
-        else: neigh_preceeding_orbit = get_routing_sat_obj_by_satnum(neigh_preceeding_orbit_satnum)
-        if neigh_succeeding_orbit_satnum is None: neigh_succeeding_orbit = None
-        else: neigh_succeeding_orbit = get_routing_sat_obj_by_satnum(neigh_succeeding_orbit_satnum)
-
-        cur_sat_neigh_list = [neigh_fore, neigh_aft, neigh_preceeding_orbit, neigh_succeeding_orbit]
+        cur_sat_neigh_list = cur_sat.get_list_of_cur_sat_neighbors()
 
         # Set distances for adjancent satellites
         for testing_sat in cur_sat_neigh_list:
             if not testing_sat is None:
                 if testing_sat.sat.model.satnum in unvisted_sat_dict:
-                    #testing_sat_dist = get_sat_distance(cur_sat.sat.at(cur_time), testing_sat.sat.at(cur_time))
                     testing_sat_dist = 1 # just a single hop from current satellite to testing satellite
                     tentative_dist = cur_sat_dist + testing_sat_dist
                     if tentative_dist < unvisted_sat_dict[testing_sat.sat.model.satnum][0]:
@@ -1530,23 +1557,26 @@ def send_directed_routing_packet_from_source(starting_satnum, starting_terminal,
     #print(f"::send_directed_routing_packet_from_source():: starting_satnum: {starting_satnum}, starting_terminal: {starting_terminal}, packet: {packet}")
     starting_sat = get_routing_sat_obj_by_satnum(starting_satnum)
 
-    topo_position = (starting_sat.sat - starting_terminal).at(cur_time)
-    _, _, dist = topo_position.altaz()
+    #topo_position = (starting_sat.sat - starting_terminal).at(cur_time)
+    #_, _, dist = topo_position.altaz()
+    _, _, dist = (starting_sat.sat - starting_terminal).at(cur_time).altaz()
     if not starting_sat.is_overhead_of(starting_terminal):
         print(f"Satellite {starting_satnum} is not overhead starting terminal _after routing_ - starting terminal: {starting_terminal}")
         no_sat_overhead_cnt += 1
-        return
+        return -1
     packet['distance_traveled'] += dist.km
     add_to_packet_qu_by_satnum(starting_satnum, packet)
     
 def send_distributed_routing_packet_from_source(src, dest):
-    global num_packets_dropped
+    global no_sat_overhead_cnt
     sat_overhead = False
     for routing_sat in sat_object_list:
         if routing_sat.is_overhead_of(src):
             sat_overhead = True
             break
     if not sat_overhead:
+        print(f"No satellite overhead starting terminal {src}", end='\r')
+        no_sat_overhead_cnt += 1
         return -1
     distance = get_sat_distance(src.at(cur_time), routing_sat.sat.at(cur_time))
     # ::: distributed routing packet structure: [[prev_hop_list], distance_traveled, dest_gs] - packet is at destination when satellite is above dest_gs
@@ -1623,7 +1653,7 @@ def build_constellation(source_sat):
             sat = EarthSatellite.from_satrec(fake_sat, time_scale)
             orbit.append(sat)
 
-            new_sat = RoutingSat(sat, satnum, orbit_index, sat_index, (orbit_index + 2) % orbit_cnt, (orbit_index - 2) % orbit_cnt, ((sat_index + 1) % sats_per_orbit) + (orbit_index*sats_per_orbit), ((sat_index - 1) % sats_per_orbit) + (orbit_index*sats_per_orbit))
+            new_sat = RoutingSat(sat, satnum, orbit_index, sat_index, (orbit_index + 1) % orbit_cnt, (orbit_index - 1) % orbit_cnt, ((sat_index + 1) % sats_per_orbit) + (orbit_index*sats_per_orbit), ((sat_index - 1) % sats_per_orbit) + (orbit_index*sats_per_orbit))
             sat_object_list.append(new_sat)
             satnum += 1
         
@@ -1710,30 +1740,35 @@ def directed_dijkstra_distance_routing():
         print("Some packets unaccounted for!!")
 
 def distributed_link_state_routing():
-    global no_sat_overhead_cnt
-    global num_packets_dropped
-    global num_packets_sent
+    global num_packets_dropped, num_packets_sent
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
-    # Work through packet scheduler at each time interval and send all scheduled packets
+    # Loop through all time interverals and perform the following operations:
+    #   1. Send all packets scheduled by packet scheduler
+    #   2. All satellites update neighbor states (first publish their state to their neighbors, then update internal neighbor state table)
+    #   3. All satellites send all packets that can be sent
+    #   4. Increment time interval
+    
     for time_interval in range(max_time_inverals):
         print(f"::distributed_link_state_routing::  Time interval: {time_interval}")
+        # 1. Work through packet scheduler at each time interval and send all scheduled packets
         if time_interval in packet_schedule:
             packet_send_list = packet_schedule[time_interval]
             for packet in packet_send_list:
                 src, dest = packet
                 if send_distributed_routing_packet_from_source(src, dest) == -1:
-                    print(f"No satellite overhead starting terminal {src}", end='\r')                
-                    no_sat_overhead_cnt += 1
                     num_packets_dropped += 1
                 num_packets_sent += 1
             del packet_schedule[time_interval]
+        
+        # 2. Update all neighbor states for current time interval
         print("Updating neighbor states")
         start = time.process_time()
         # each satellite publishes it's state to it's neighbors and then the satellites process the received data
         all_sats_update_neigh_state()
         compute_time = time.process_time() - start
         print(f"Time to compute neighbor states: {compute_time}")
-        # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
+        
+        # 3. Keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
         print("Checking for packets to send")
         start = time.process_time()
         packets_sent = True
@@ -1747,6 +1782,8 @@ def distributed_link_state_routing():
         if (len(packet_schedule) == 0) and (num_packets_received + num_packets_dropped == num_packets_sent):
             print("All packets sent and accounted for.  Terminating simulation")
             break
+        
+        # 4. Increment time interval
         increment_time()
     if len(packet_schedule) > 0:
         print(f"Failed to send all packets in schedule.  {len(packet_schedule)} packets remaining in schedule")
