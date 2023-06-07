@@ -66,7 +66,7 @@ orbit_cnt = 72
 
 # Adjacent satellite characterisitcs
 g_lat_range = 1 # satellites to E/W can fall within +- this value
-lateral_antenna_range = 30 #30
+lateral_antenna_range = 40 #30
 
 # Ground Station characteristics
 req_elev = 40 # https://www.reddit.com/r/Starlink/comments/i1ua2y/comment/g006krb/?utm_source=share&utm_medium=web2x
@@ -307,6 +307,8 @@ class RoutingSat:
         aft_port_range_max = aft_port_bearing+int(lateral_antenna_range/2)
         aft_starboard_range_min = aft_starboard_bearing-int(lateral_antenna_range/2)
         aft_starboard_range_max = aft_starboard_bearing+int(lateral_antenna_range/2)
+        print(f"::check_neighboring_orbit_sat_available:: Interface intervals: fore_port: {fore_port_range_min}-{fore_port_range_max}, fore_starboard: {fore_starboard_range_min}-{fore_starboard_range_max}, aft_port: {aft_port_range_min}-{aft_port_range_max}, aft_starboard: {aft_starboard_range_min}-{aft_starboard_range_max}")
+
         # find min/max satnums for target orbit
         min_satnum = neighboring_orbit_num * sats_per_orbit
         max_satnum = min_satnum + sats_per_orbit
@@ -316,8 +318,9 @@ class RoutingSat:
         for test_satnum in range(min_satnum, max_satnum):
             test_sat_bearing = get_rel_bearing_by_satnum_degrees(self.sat.model.satnum, test_satnum, heading)
             distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
-            if distance > 1000:
+            if distance > 2000:
                 continue  # Don't try to connect to lateral satellites with distances > 1000km - seems like an unreasonable ability 
+            print(f"::check_neighboring_orbit_sat_available:: Testing satnum {test_satnum} at bearing {test_sat_bearing:.0f} with distance {distance:,.0f}")
             if (test_sat_bearing - fore_port_range_min) % 360 <= (fore_port_range_max - fore_port_range_min) % 360:
                 tentative_satnum_list.append((test_satnum, 'fore_port'))
             elif (test_sat_bearing - fore_starboard_range_min) % 360 <= (fore_starboard_range_max - fore_starboard_range_min) % 360:
@@ -327,6 +330,8 @@ class RoutingSat:
             elif (test_sat_bearing - aft_starboard_range_min) % 360 <= (aft_starboard_range_max - aft_starboard_range_min) % 360:
                 tentative_satnum_list.append((test_satnum, 'aft_starboard'))
         
+        if len(tentative_satnum_list) == 0:
+            return []
         # find closest satellite for each interface and append to neighboring_satnum_list
         for interface in interfaces:
             interface_list = []
@@ -2250,7 +2255,7 @@ def main ():
     # ---------- TESTING ------------
     target_satnum = 501
     set_time_interval(60) # set time interval to 60 seconds
-    num_time_increments = 40
+    num_time_increments = 10
     print_satellite_neighbors_over_time(sat_object_list[target_satnum], num_time_increments)
     exit ()
     # ---------- ROUTING ------------   
