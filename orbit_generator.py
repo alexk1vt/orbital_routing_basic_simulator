@@ -66,7 +66,13 @@ orbit_cnt = 72
 
 # Adjacent satellite characterisitcs
 g_lat_range = 1 # satellites to E/W can fall within +- this value
-lateral_antenna_range = 40 #30
+lateral_antenna_range = 30 #30  # in degrees.  Lateral satellite bearings can fall +- lateral_antenna_range / 2
+# lateral antenna interface bearings
+fore_port_interface_bearing = 25 # 45
+fore_starboard_interface_bearing = 335 #315
+aft_port_interface_bearing = 155 #135
+aft_starboard_interface_bearing = 205 #225
+max_lateral_antenna_range = 1500 # 1500 km
 
 # Ground Station characteristics
 req_elev = 40 # https://www.reddit.com/r/Starlink/comments/i1ua2y/comment/g006krb/?utm_source=share&utm_medium=web2x
@@ -294,20 +300,20 @@ class RoutingSat:
         neighboring_satnum_list = []
         # get our bearings
         heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
-        fore_port_bearing = 45
-        fore_starboard_bearing = 315
-        aft_port_bearing = 135
-        aft_starboard_bearing = 225
+        #fore_port_bearing = 45  # moving these to global variables
+        #fore_starboard_bearing = 315
+        #aft_port_bearing = 135
+        #aft_starboard_bearing = 225
         # find min/max for each interface
-        fore_port_range_min = fore_port_bearing-int(lateral_antenna_range/2)
-        fore_port_range_max = fore_port_bearing+int(lateral_antenna_range/2)
-        fore_starboard_range_min = fore_starboard_bearing-int(lateral_antenna_range/2)
-        fore_starboard_range_max = fore_starboard_bearing+int(lateral_antenna_range/2)
-        aft_port_range_min = aft_port_bearing-int(lateral_antenna_range/2)
-        aft_port_range_max = aft_port_bearing+int(lateral_antenna_range/2)
-        aft_starboard_range_min = aft_starboard_bearing-int(lateral_antenna_range/2)
-        aft_starboard_range_max = aft_starboard_bearing+int(lateral_antenna_range/2)
-        print(f"::check_neighboring_orbit_sat_available:: Interface intervals: fore_port: {fore_port_range_min}-{fore_port_range_max}, fore_starboard: {fore_starboard_range_min}-{fore_starboard_range_max}, aft_port: {aft_port_range_min}-{aft_port_range_max}, aft_starboard: {aft_starboard_range_min}-{aft_starboard_range_max}")
+        fore_port_range_min = fore_port_interface_bearing-int(lateral_antenna_range/2)
+        fore_port_range_max = fore_port_interface_bearing+int(lateral_antenna_range/2)
+        fore_starboard_range_min = fore_starboard_interface_bearing-int(lateral_antenna_range/2)
+        fore_starboard_range_max = fore_starboard_interface_bearing+int(lateral_antenna_range/2)
+        aft_port_range_min = aft_port_interface_bearing-int(lateral_antenna_range/2)
+        aft_port_range_max = aft_port_interface_bearing+int(lateral_antenna_range/2)
+        aft_starboard_range_min = aft_starboard_interface_bearing-int(lateral_antenna_range/2)
+        aft_starboard_range_max = aft_starboard_interface_bearing+int(lateral_antenna_range/2)
+        #print(f"::check_neighboring_orbit_sat_available:: Interface intervals: fore_port: {fore_port_range_min}-{fore_port_range_max}, fore_starboard: {fore_starboard_range_min}-{fore_starboard_range_max}, aft_port: {aft_port_range_min}-{aft_port_range_max}, aft_starboard: {aft_starboard_range_min}-{aft_starboard_range_max}")
 
         # find min/max satnums for target orbit
         min_satnum = neighboring_orbit_num * sats_per_orbit
@@ -318,9 +324,9 @@ class RoutingSat:
         for test_satnum in range(min_satnum, max_satnum):
             test_sat_bearing = get_rel_bearing_by_satnum_degrees(self.sat.model.satnum, test_satnum, heading)
             distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
-            if distance > 2000:
+            if distance > max_lateral_antenna_range:
                 continue  # Don't try to connect to lateral satellites with distances > 1000km - seems like an unreasonable ability 
-            print(f"::check_neighboring_orbit_sat_available:: Testing satnum {test_satnum} at bearing {test_sat_bearing:.0f} with distance {distance:,.0f}")
+            #print(f"::check_neighboring_orbit_sat_available:: Testing satnum {test_satnum} at bearing {test_sat_bearing:.0f} with distance {distance:,.0f}")
             if (test_sat_bearing - fore_port_range_min) % 360 <= (fore_port_range_max - fore_port_range_min) % 360:
                 tentative_satnum_list.append((test_satnum, 'fore_port'))
             elif (test_sat_bearing - fore_starboard_range_min) % 360 <= (fore_starboard_range_max - fore_starboard_range_min) % 360:
@@ -535,13 +541,13 @@ class RoutingSat:
         elif neigh_sat_interface == 'starboard':
             neigh_sat_interface_bearing = 90
         elif neigh_sat_interface == 'fore_port':
-            neigh_sat_interface_bearing = 315
+            neigh_sat_interface_bearing = fore_port_interface_bearing 
         elif neigh_sat_interface == 'fore_starboard':
-            neigh_sat_interface_bearing = 45
+            neigh_sat_interface_bearing = fore_starboard_interface_bearing 
         elif neigh_sat_interface == 'aft_port':
-            neigh_sat_interface_bearing = 225
+            neigh_sat_interface_bearing = aft_port_interface_bearing 
         elif neigh_sat_interface == 'aft_starboard':
-            neigh_sat_interface_bearing = 135
+            neigh_sat_interface_bearing = aft_starboard_interface_bearing 
         else:
             print(f"Neighbor sat interface: {neigh_sat_interface} not recognized, aborting")
             exit()
@@ -1090,7 +1096,7 @@ def increment_time():
                     print(f"::increment_time:: Packet dropped due to TTL for satnum: {r_sat.sat.model.satnum}")
                     r_sat.packet_qu.remove(packet)
     cur_time_increment += 1
-    print(f"::increment_time:: Current time incremented to: {cur_time.utc_jpl()}, time increment: {cur_time_increment}, scheduled time intervals: {num_time_intervals}")
+    #print(f"::increment_time:: Current time incremented to: {cur_time.utc_jpl()}, time increment: {cur_time_increment}, scheduled time intervals: {num_time_intervals}")
     if do_disruptions: apply_disruption_schedule() # apply any disruptions that are scheduled for this time increment
 
 def set_time_interval(interval_seconds): # sets the time interval (in seconds)
@@ -2254,8 +2260,8 @@ def main ():
     
     # ---------- TESTING ------------
     target_satnum = 501
-    set_time_interval(60) # set time interval to 60 seconds
-    num_time_increments = 10
+    set_time_interval(120) # set time interval to 60 seconds
+    num_time_increments = 45
     print_satellite_neighbors_over_time(sat_object_list[target_satnum], num_time_increments)
     exit ()
     # ---------- ROUTING ------------   
