@@ -2259,9 +2259,9 @@ def main ():
     print(f"Set current time to: {cur_time.utc_jpl()}")
     
     # ---------- TESTING ------------
-    target_satnum = 501
+    target_satnum = 1318
     set_time_interval(120) # set time interval to 60 seconds
-    num_time_increments = 45
+    num_time_increments = 90
     print_satellite_neighbors_over_time(sat_object_list[target_satnum], num_time_increments)
     exit ()
     # ---------- ROUTING ------------   
