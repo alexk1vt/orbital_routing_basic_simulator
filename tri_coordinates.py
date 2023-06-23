@@ -1,5 +1,7 @@
 # tri_coordinates.py
 
+from orbit_generator import sats_per_orbit
+from orbit_generator import orbit_cnt as num_orbits
 import baseS # import the baseS class - use as baseS.baseS(decimalValue, num_orbits, sats_per_orbit)
 
 def x_transform(x):
@@ -32,15 +34,7 @@ def get_sat_ABC(satnum):
     C_val = (int(((orbit_num + (orbit_num % 2)) % num_orbits) / 2)  + orbit_index) % sats_per_orbit
     C = baseS.baseS(C_val, num_orbits, sats_per_orbit)
 
-# An implementation of Routing Method 2 using the connectivity simulator
-# Need to translate N,NE,SE,S,SW,NW satellites in logical map to those in the simulator
-# I need to:
-#  - Identify which satellites are port/starboard (ascending/descending)
-#  - maintain way to know 'state' of routing (ie, change needed, change not needed)
-#    + perhaps just track which interface the packet came in on and forward to opposite
-#      only when change condition is met
-def triCoordRouteMethod2(curr_satnum, received_interface, dest_satnum):
-    pass
+    return A, B, C
 
 # method for finding the distance between two coordinates on a ring
 # Given triCoordinates for both current satellite and destination satellite,
@@ -117,3 +111,39 @@ def calc_triCoord_dist(curr_A, curr_B, curr_C, dest_A, dest_B, dest_C): # This i
         C_diff = dest_C - curr_C
 
     return A_diff, B_diff, C_diff
+
+def calc_triCoord_next_hop_logical_direction(reduction_axis, reduction_dir, along_axis):
+        if along_axis == 'A':
+            if reduction_axis == 'B':
+                if reduction_dir == 'pos':
+                    logical_direction = 'logical_S'
+                else:
+                    logical_direction = 'logical_N'
+            else: # major_axis == 'C'
+                if reduction_dir == 'pos':
+                    logical_direction = 'logical_N'
+                else:
+                    logical_direction = 'logical_S'
+        elif along_axis == 'B':
+            if reduction_axis == 'A':
+                if reduction_dir == 'pos':
+                    logical_direction = 'logical_NE'
+                else:
+                    logical_direction = 'logical_SW'
+            else: # major_axis == 'C'
+                if reduction_dir == 'pos':
+                    logical_direction = 'logical_NE'
+                else:
+                    logical_direction = 'logical_SW'
+        else: # along_axis is C
+            if reduction_axis == 'A':
+                if reduction_dir == 'pos':
+                    logical_direction = 'logical_SE'
+                else:
+                    logical_direction = 'logical_NW'
+            else: # major_axis == 'B'
+                if reduction_dir == 'pos':
+                    logical_direction = 'logical_SE'
+                else:
+                    logical_direction = 'logical_NW'
+        return logical_direction
