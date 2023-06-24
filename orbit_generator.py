@@ -10,7 +10,12 @@ import time
 import os # for cpu_count()
 import threading # for multithreading
 #from multiprocessing import Process, Queue
-import multiprocessing as mp 
+import multiprocessing as mp
+import multiprocessing.shared_memory
+
+import sys # for recursive get_size() function
+import gc # for actualsize() function
+import getopt # for command line arguments
 
 # for plotting orbits
 import numpy as np
@@ -23,15 +28,17 @@ import tri_coordinates
 
 # :: Simulation Options::
 do_multithreading = True
-do_multiprocessing = False
+do_multiprocessing = False # Doesn't work -- multiprocessing takes precedence over multithreading where appropriate
 draw_static_orbits = False
 draw_distributed_orbits = False
 testing = False
 plot_dropped_packets = False
 do_disruptions = False
 packet_schedule_method = "static" # "random", "alt_random", "static"
-test_point_to_point = True # routes repeatedly between two static locations over specified time intervals
-routing_name = "Distributed Link State Bearing" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"
+packet_schedule_method_options = ["random", "alt_random", "static"]
+test_point_to_point = True # routes repeatedly between two static locations over specified time intervals -- MUST BE SET FOR 'STATIC' PACKET SCHEDULE METHOD
+routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"
+routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"]
 time_interval = 10 # interval between time increments, measured in seconds
 num_time_intervals = 5
 
@@ -45,6 +52,9 @@ packet_bandwidth_per_sec = 100 # the number of packets a satellite can send in a
 packet_backlog_size = 1000 # the number of packets that can be stored in a satellite's queue (10 sec worth of data)
 packet_start_TTL = 10 # the number of seconds a packet can be stored in a satellite's queue before it is dropped
 packets_generated_per_interval = 20 # 100 # the number of packets generated per time interval by the packet scheduler
+
+# multiprocessing variables
+shm = None
 
 # Multi threading
 num_threads = max(os.cpu_count()-2, 1) # 4
@@ -160,38 +170,62 @@ class RoutingSat:
     def distributed_routing_link_state_process_packet_queue(self):
         if do_disruptions:
             if self.is_disrupted:
-                print(f"::distributed_routing_link_state_process_packet_queue: satellite {self.satnum} is disrupted, so not processing packets")
+                print(f"::distributed_routing_link_state_process_packet_queue: satellite {self.satnum} is disrupted - not processing packets")
                 return -1 # don't process packets if the satellite is disrupted
 
         if (self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval) or (len(self.packet_qu) == 0):
             return -1
         sent_packet = False
 
-        global num_packets_dropped
-        global num_max_hop_packets_dropped
+        global num_packets_dropped, num_max_hop_packets_dropped, num_packets_received, total_distance_traveled, total_hop_count, no_sat_overhead_cnt
         for packet in self.packet_qu:
             if self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval:  # First, check if satellite exceeded packet bandwidth; notify neighbors of congestion if so
+                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet bandwidth exceeded.  Congestion on-demand sent to neighbors")
                 self.update_neigh_state(congestion = True) # tell neighbors of congestion on-demand (this will be cleared next time interval if packet count is low enough)
                 self.congestion_cnt += 1
                 break
-            if self.is_overhead_of(packet['dest_gs']): # Second, check if satellite is overhead destination ground station / terminal; deliver packet if so
-                topo_position = (self.sat - packet['dest_gs']).at(cur_time)
-                _, _, dist = topo_position.altaz()
-                packet['distance_traveled'] += dist.km
-                distance_traveled = packet['distance_traveled']
-                hop_count = len(packet['prev_hop_list'])
-                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {secs_per_km * int(distance_traveled):.2f} seconds)") # == source: {packet['source_gs']} -- destination: {packet['dest_gs']}")
-                global num_packets_received, total_distance_traveled, total_hop_count
-                num_packets_received += 1
-                total_distance_traveled += distance_traveled
-                total_hop_count += hop_count
-                if draw_static_orbits:
-                    if len(packet['prev_hop_list']) > 30:
-                        draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
-                self.packet_qu.remove(packet)
-                sent_packet = True
-                self.packets_sent_cnt += 1
-            elif len(packet['prev_hop_list']) > distributed_max_hop_count: # Third, check if packet has taken too many hops; drop if so
+            if 'dest_satnum' in packet:
+                if packet['dest_satnum'] == self.sat.model.satnum:
+                    #print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet received by destination satellite")
+                    topo_position = (self.sat - packet['dest_gs']).at(cur_time)
+                    _, _, dist = topo_position.altaz()
+                    packet['distance_traveled'] += dist.km
+                    distance_traveled = packet['distance_traveled']
+                    hop_count = len(packet['prev_hop_list'])
+                    print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {secs_per_km * int(distance_traveled):.2f} seconds)")
+                    #print(f"Packet traveled through sats: {packet['prev_hop_list']}")
+                    num_packets_received += 1
+                    total_distance_traveled += distance_traveled
+                    total_hop_count += hop_count
+                    if draw_static_orbits:
+                        if len(packet['prev_hop_list']) > 30:
+                            draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
+                    self.packet_qu.remove(packet)
+                    sent_packet = True
+                    self.packets_sent_cnt += 1
+                    continue
+            else:
+                if self.is_overhead_of(packet['dest_gs']): # Second, check if satellite is overhead destination ground station / terminal; deliver packet if so
+                    print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet delivered to destination ground station / terminal")
+                    topo_position = (self.sat - packet['dest_gs']).at(cur_time)
+                    _, _, dist = topo_position.altaz()
+                    packet['distance_traveled'] += dist.km
+                    distance_traveled = packet['distance_traveled']
+                    hop_count = len(packet['prev_hop_list'])
+                    print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {secs_per_km * int(distance_traveled):.2f} seconds)") # == source: {packet['source_gs']} -- destination: {packet['dest_gs']}")
+                    print(f"Packet traveled through sats: {packet['prev_hop_list']}")
+                    num_packets_received += 1
+                    total_distance_traveled += distance_traveled
+                    total_hop_count += hop_count
+                    if draw_static_orbits:
+                        if len(packet['prev_hop_list']) > 30:
+                            draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
+                    self.packet_qu.remove(packet)
+                    sent_packet = True
+                    self.packets_sent_cnt += 1
+                    continue
+            if len(packet['prev_hop_list']) > distributed_max_hop_count: # Third, check if packet has taken too many hops; drop if so
+                print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet exceeded max hop count.  Dropping packet.")
                 print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet exceeded max hop count.  Dropping packet.")
                 num_max_hop_packets_dropped += 1
                 num_packets_dropped += 1
@@ -199,6 +233,7 @@ class RoutingSat:
                     draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"distributed link-state dropped packet - {len(packet['prev_hop_list'])} hops", draw_lines = True, draw_sphere = True)
                 self.packet_qu.remove(packet)
             else: # Fourth, find next hop for packet; add distance of hop to counter; and add to next hop's packet queue
+                #print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Finding next hop.")
                 if len(packet['prev_hop_list']) == 0:
                     prev_hop = None
                 else:
@@ -547,7 +582,6 @@ class RoutingSat:
         if self.aft_starboard_int_up and (not self.aft_starboard_sat_satnum is None):
             avail_neigh_routing_sats.append(sat_object_list[self.aft_starboard_sat_satnum])
             
-        routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"
         if routing_name == "Distributed Link State TriCoord":
             return self.link_state_routing_method_triCoord(avail_neigh_routing_sats, dest_satnum, prev_hop_satnum)
         elif routing_name == "Distributed Link State Bearing":
@@ -1092,6 +1126,42 @@ class RoutingSat:
         return cur_sat_neigh_list
 
 # End Routing sat class
+# From https://towardsdatascience.com/the-strange-size-of-python-objects-in-memory-ce87bdfbb97f
+def actualsize(input_obj):
+    memory_size = 0
+    ids = set()
+    objects = [input_obj]
+    while objects:
+        new = []
+        for obj in objects:
+            if id(obj) not in ids:
+                ids.add(id(obj))
+                memory_size += sys.getsizeof(obj)
+                new.append(obj)
+        objects = gc.get_referents(*new)
+    return memory_size
+
+# From https://goshippo.com/blog/measure-real-size-any-python-object/
+def get_size(obj, seen=None):
+    """Recursively finds size of objects"""
+    size = sys.getsizeof(obj)
+    if seen is None:
+        seen = set()
+    obj_id = id(obj)
+    if obj_id in seen:
+        return 0
+    # Important mark as seen *before* entering recursion to gracefully handle
+    # self-referential objects
+    seen.add(obj_id)
+    if isinstance(obj, dict):
+        size += sum([get_size(v, seen) for v in obj.values()])
+        size += sum([get_size(k, seen) for k in obj.keys()])
+    elif hasattr(obj, '__dict__'):
+        size += get_size(obj.__dict__, seen)
+    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
+        size += sum([get_size(i, seen) for i in obj])
+    return size
+
 
 ## :: General Functions ::
 # satellite updates it's internal neigh link states and sends updates to own neighbors
@@ -1141,7 +1211,7 @@ def all_sats_update_neigh_state():
     if do_multithreading:
         thread_list = []
         for index in range(num_threads):
-            thread = threading.Thread(target=mt_publish_state_to_neighbors, args=(index,))
+            thread = threading.Thread(target=mt_publish_state_to_neighbors, args=(index,), daemon=True)
             thread.start()
             thread_list.append(thread)
         for thread in thread_list:
@@ -1156,7 +1226,7 @@ def all_sats_update_neigh_state():
     if do_multithreading:
         thread_list = []
         for index in range(num_threads):
-            thread = threading.Thread(target=mt_update_neigh_state_table, args=(index,))
+            thread = threading.Thread(target=mt_update_neigh_state_table, args=(index,), daemon=True)
             thread.start()
             thread_list.append(thread)
         for thread in thread_list:
@@ -1929,6 +1999,7 @@ def send_distributed_routing_packet_from_source(src_gs, dest_gs):
     for routing_sat in sat_object_list:
         if routing_sat.is_overhead_of(src_gs):
             sat_overhead_src = True
+            src_routing_sat = routing_sat
         if routing_sat.is_overhead_of(dest_gs):
             sat_overhead_dest = True
             dest_satnum = routing_sat.sat.model.satnum
@@ -1942,9 +2013,10 @@ def send_distributed_routing_packet_from_source(src_gs, dest_gs):
         print(f"No satellite overhead destination terminal {dest_gs}", end='\r')
         no_sat_overhead_cnt += 1
         return -1
-    distance = get_sat_distance(src_gs.at(cur_time), routing_sat.sat.at(cur_time))
+    distance = get_sat_distance(src_gs.at(cur_time), src_routing_sat.sat.at(cur_time))
+    #print(f"::send_distributed_routing_packet_from_source():: Sending packet from {src_routing_sat.sat.model.satnum} to {dest_satnum}")
     packet = {'prev_hop_list': [], 'distance_traveled': distance, 'dest_gs': dest_gs, 'source_gs': src_gs, 'TTL' : packet_start_TTL, 'dest_satnum': dest_satnum}
-    add_to_packet_qu_by_satnum(routing_sat.sat.model.satnum, packet)
+    add_to_packet_qu_by_satnum(src_routing_sat.sat.model.satnum, packet)
 
 def build_constellation(source_sat):
 
@@ -2044,13 +2116,14 @@ def init_worker_processes(_sat_object_list):
     global local_sat_object_list
     local_sat_object_list = _sat_object_list
 
-def mp_find_route_dijkstra_hop(proc_index, raw_packet, local_sat_object_list, results):
+def mp_find_route_dijkstra_hop(raw_packet):
     src, dest = raw_packet
+    local_sat_object_list = mp.shared_memory.SharedMemory(name='sat_object_list')
     #print(f"::mt_find_route_dijkstra_hop:: received src: {src}, dest {dest}, sat_object_list size: {len(local_sat_object_list)}")
     src_satnum, packet, error_str = find_route_dijkstra_hop(src, dest, False, local_sat_object_list)
-    print(f"::mp_find_route_dijkstra_hop:: calculated src_satnum: {src_satnum}")
+    print(f"::mp_find_route_dijkstra_hop:: calculated src_satnum: {src_satnum}", end='\r')
     #packets_to_send.put((src_satnum, src, packet))
-    results.put((src_satnum, src, packet, error_str))
+    return (src_satnum, src, packet, error_str)
 
 def mt_find_route_dijkstra_hop(thread_index, raw_packet):
     global no_sat_overhead_cnt, num_route_calc_failures, num_packets_dropped
@@ -2067,7 +2140,7 @@ def mt_find_route_dijkstra_hop(thread_index, raw_packet):
     
 
 def directed_dijkstra_hop_routing():
-    global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name, num_route_calc_failures, sat_object_list
+    global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name, num_route_calc_failures, sat_object_list, shm
     name = "Directed Dijkstra Hop"
 
     #if do_multithreading:
@@ -2086,6 +2159,24 @@ def directed_dijkstra_hop_routing():
             packet_send_list_size = len(packet_send_list)
             print(f"::directed_dijkstra_hop_routing:: Sending packets for time interval {cur_time_increment}; {len(packet_schedule)-1} remaining")
             if do_multiprocessing:
+                buff_size = actualsize(sat_object_list)
+                shm = mp.shared_memory.SharedMemory(create=True, size=buff_size, name='sat_object_list')
+                shm.buf[:] = bytearray(sat_object_list)
+                with mp.Pool(num_threads) as pool:
+                    results = pool.map(mp_find_route_dijkstra_hop, packet_send_list)
+                
+                for result in results:
+                    src_satnum, src, packet, error_str = result
+                    if src_satnum == -1:
+                        num_packets_dropped += 1
+                        if error_str == 'no_sat_overhead':
+                            no_sat_overhead_cnt += 1
+                        elif error_str == 'route_calc_failure':
+                            num_route_calc_failures += 1
+                    else:
+                        send_directed_routing_packet_from_source(src_satnum, src, packet)        
+                
+                """
                 process_list = []
                 results = mp.Queue()
                 packet_index = 0
@@ -2113,6 +2204,7 @@ def directed_dijkstra_hop_routing():
                             num_route_calc_failures += 1
                     else:
                         send_directed_routing_packet_from_source(src_satnum, src, packet)
+                """
             elif (do_multithreading):
                 thread_list = []
                 packet_index = 0
@@ -2120,13 +2212,13 @@ def directed_dijkstra_hop_routing():
                     for thread_index in range (num_threads):
                         if packet_index == packet_send_list_size:
                             break
-                        t = threading.Thread(target=mt_find_route_dijkstra_hop, args=(thread_index, packet_send_list[packet_index]))
-                        thread_list.append(t)
-                        t.start()
+                        thread = threading.Thread(target=mt_find_route_dijkstra_hop, args=(thread_index, packet_send_list[packet_index]), daemon=True)
+                        thread_list.append(thread)
+                        thread.start()
                         num_packets_sent += 1
                         packet_index += 1
-                    for t in thread_list:
-                        t.join()
+                    for thread in thread_list:
+                        thread.join()
             else:
                 for packet in packet_send_list:
                     num_packets_sent += 1
@@ -2631,9 +2723,9 @@ def static_build_packet_schedule():
                 packet_schedule[interval] = []
             # determine which traffic category it will be
             if test_point_to_point:
-                index1 = 1
-                index2 = -1
-                packet_schedule[interval].append((city_list[index1], city_list[index2]))
+                city1 = New_York
+                city2 = Sydney
+                packet_schedule[interval].append((city1, city2))
             else:
                 index1 = (num_time_intervals + packets_generated_per_interval + (3*packet_cnt)) % len(city_list)
                 index2 = (num_time_intervals + interval + packets_generated_per_interval + (2*packet_cnt) + 3) % len(city_list)
@@ -2675,6 +2767,40 @@ def print_satellite_neighbors_over_time(r_sat, num_time_increments):
         print(f"Satellite {r_sat.sat.model.satnum} neighbors at lat {lat:.2f}= fore: {r_sat.fore_sat_satnum}, aft: {r_sat.aft_sat_satnum}, port: {r_sat.port_sat_satnum}, starboard: {r_sat.starboard_sat_satnum}, fore_port: {r_sat.fore_port_sat_satnum}, fore_starboard: {r_sat.fore_starboard_sat_satnum}, aft_port: {r_sat.aft_port_sat_satnum}, aft_starboard: {r_sat.aft_starboard_sat_satnum}")
         increment_time()
 
+def print_configured_options():
+    print("::Configured Options::")
+    print(f"  Multithreaded: {do_multithreading}")
+    print(f"  Multiprocessing: {do_multiprocessing}")
+    if do_multithreading or do_multiprocessing:
+        print(f"    Running with {num_threads} threads")
+    print(f"  Draw static orbits: {draw_static_orbits}")
+    print(f"  Draw distributed orbits: {draw_distributed_orbits}")
+    print(f"  Do test_point_to_point: {test_point_to_point}")
+    print(f"  Testing: {testing}")
+    print(f"  Plot dropped packets: {plot_dropped_packets}")
+    print(f"  Doing satellite disruptions: {do_disruptions}")
+    print(f"  Packet scheduling method: {packet_schedule_method}")
+    print(f"  Routing method: {routing_name}")
+    print(f"  Interval between time increments: {time_interval} seconds")
+    print(f"  Number of time intervals: {num_time_intervals}")
+
+def print_help(options, long_options, option_explanation):
+    pruned_options = []
+    for option in options:
+        if option != ":":
+            pruned_options.append(option)
+    print("::Help::")
+    print(f"  Usage: python3 {sys.argv[0]} [options]")
+    print(f"  Options:")
+    for i in range(len(pruned_options)):
+        print(f"    -{pruned_options[i]}; --{long_options[i]}")
+        print(f"      {option_explanation[i]}")
+        if pruned_options[i] == 'r':
+            print(f"      Routing methods: {routing_name_options}")
+        elif pruned_options[i] == 'c':
+            print(f"      Packet scheduling methods: {packet_schedule_method_options}")
+    print("Default options:")
+    print_configured_options()
 
 # ::::::: MAIN :::::::
 
@@ -2701,20 +2827,60 @@ def main ():
     cur_time_next = time_scale.utc(2023, 5, 9, 0, 0, 1)
     print(f"Set current time to: {cur_time.utc_jpl()}")
 
-    print("::Configured Options::")
-    print(f"  Multithreaded: {do_multithreading}")
-    if do_multithreading:
-        print(f"    Running with {num_threads} threads")
-    print(f"  Draw static orbits: {draw_static_orbits}")
-    print(f"  Draw distributed orbits: {draw_distributed_orbits}")
-    print(f"  Do test_point_to_point: {test_point_to_point}")
-    print(f"  Testing: {testing}")
-    print(f"  Plot dropped packets: {plot_dropped_packets}")
-    print(f"  Doing satellite disruptions: {do_disruptions}")
-    print(f"  Packet scheduling method: {packet_schedule_method}")
-    print(f"  Routing method: {routing_name}")
-    print(f"  Interval between time increments: {time_interval} seconds")
-    print(f"  Number of time intervals: {num_time_intervals}")
+    # Accept Command Line Arguments
+    argumentList = sys.argv[1:]
+    options = "hmutpr:i:n:odasc:"
+    long_options = ["help", "multithreaded", "multiprocessing", "test", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method"]
+    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "run testing functions", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method"]
+    try:
+        arguments, values = getopt.getopt(argumentList, options, long_options)
+    except getopt.error as err:
+        print(str(err))
+        sys.exit(2)
+    for currentArgument, currentValue in arguments:
+        if currentArgument in ("-h", "--help"):
+            print_help(options, long_options, option_explanation)
+            sys.exit()
+        elif currentArgument in ("-m", "--multithreaded"):
+            global do_multithreading
+            do_multithreading = True
+        elif currentArgument in ("-u", "--multiprocessing"):
+            global do_multiprocessing
+            do_multiprocessing = True
+        elif currentArgument in ("-t", "--test"):
+            global testing
+            testing = True
+        elif currentArgument in ("-p", "--point_to_point"):
+            global test_point_to_point
+            test_point_to_point = True
+        elif currentArgument in ("-r", "--routing"):
+            routing_name = currentValue
+        elif currentArgument in ("-i", "--interval"):
+            global time_interval
+            time_interval = int(currentValue)
+        elif currentArgument in ("-n", "--num_intervals"):
+            global num_time_intervals
+            num_time_intervals = int(currentValue)
+        elif currentArgument in ("-o", "--plot_dropped_packets"):
+            global plot_dropped_packets
+            plot_dropped_packets = True
+        elif currentArgument in ("-d", "--disruptions"):
+            global do_disruptions
+            do_disruptions = True
+        elif currentArgument in ("-a", "--draw_static_orbits"):
+            global draw_static_orbits
+            draw_static_orbits = True
+        elif currentArgument in ("-s", "--draw_distributed_orbits"):
+            global draw_distributed_orbits
+            draw_distributed_orbits = True
+        elif currentArgument in ("-c", "--packet_schedule_method"):
+            global packet_schedule_method
+            packet_schedule_method = currentValue
+
+    # Print out the configured options
+    print_configured_options()
+
+    
 
     # ---------- TESTING ------------
     """
@@ -2756,6 +2922,7 @@ def main ():
     
 
     # ---------- RESULTS ------------
+    print_configured_options()
     print_global_counters()
 
     full_run_time = time.time() - start_run_time
