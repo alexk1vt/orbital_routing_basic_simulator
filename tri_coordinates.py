@@ -77,14 +77,14 @@ def calc_triCoord_dist(curr_A, curr_B, curr_C, dest_A, dest_B, dest_C): # This i
             dest_B = (dest_B - 8) % sats_per_orbit
         else:
             dest_B = (dest_B + 8) % sats_per_orbit
-        print(f"\t\t::calc_dist_to_dst:: Crossing B prime meridian! {orig_dest_B} -> {dest_B}")
+        #print(f"\t\t::calc_dist_to_dst:: Crossing B prime meridian! {orig_dest_B} -> {dest_B}")
     if crossing_C_PM:
         orig_dest_C = dest_C
         if A_diff > 0:
             dest_C = (dest_C - 8) % sats_per_orbit
         else:
             dest_C = (dest_C + 8) % sats_per_orbit
-        print(f"\t\t::calc_dist_to_dst:: Crossing C prime meridian! {orig_dest_C} -> {dest_C}")
+        #print(f"\t\t::calc_dist_to_dst:: Crossing C prime meridian! {orig_dest_C} -> {dest_C}")
 
     # modulo B and C values by sats_per_orbit to account for equivelant positions (ie, B0 and B10 are same axis line)
     curr_B = curr_B % sats_per_orbit

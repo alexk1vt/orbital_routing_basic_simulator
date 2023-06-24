@@ -9,6 +9,8 @@ import math
 import time
 import os # for cpu_count()
 import threading # for multithreading
+#from multiprocessing import Process, Queue
+import multiprocessing as mp 
 
 # for plotting orbits
 import numpy as np
@@ -21,13 +23,15 @@ import tri_coordinates
 
 # :: Simulation Options::
 do_multithreading = True
+do_multiprocessing = False
 draw_static_orbits = False
 draw_distributed_orbits = False
 testing = False
 plot_dropped_packets = False
 do_disruptions = False
 packet_schedule_method = "static" # "random", "alt_random", "static"
-routing_name = "Directed Dijkstra Hop" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"
+test_point_to_point = True # routes repeatedly between two static locations over specified time intervals
+routing_name = "Distributed Link State Bearing" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"
 time_interval = 10 # interval between time increments, measured in seconds
 num_time_intervals = 5
 
@@ -181,8 +185,9 @@ class RoutingSat:
                 num_packets_received += 1
                 total_distance_traveled += distance_traveled
                 total_hop_count += hop_count
-                #if len(packet['prev_hop_list']) > 10:
-                #    draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
+                if draw_static_orbits:
+                    if len(packet['prev_hop_list']) > 30:
+                        draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
                 self.packet_qu.remove(packet)
                 sent_packet = True
                 self.packets_sent_cnt += 1
@@ -250,6 +255,9 @@ class RoutingSat:
                 distance_traveled = packet['distance_traveled']
                 hop_count = len(packet['prev_hop_list'])
                 print(f"{self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {distance_traveled:,.0f}km (transit time: {secs_per_km * int(distance_traveled):.2f} seconds)")
+                if draw_static_orbits:
+                    if len(packet['prev_hop_list']) > 30:
+                        draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['dest_gs']], title=f"Directed_routing: {routing_name}, {hop_count} hops, total distance: {distance_traveled:,.0f}km", draw_lines = True, draw_sphere = True)
                 num_packets_received += 1
                 total_distance_traveled += distance_traveled
                 total_hop_count += hop_count
@@ -1779,33 +1787,37 @@ def find_route_dijkstra_dist(src, dest):
     if send_directed_routing_packet_from_source(traverse_list[-1], src, packet) == -1:
         num_packets_dropped += 1
     
-def find_route_dijkstra_hop(src, dest):
+def find_route_dijkstra_hop(src, dest, send_packet = True, local_sat_object_list = None):
     #print("Starting Dijkstra hop routing")
     # Find satellite at least 60 deg above the horizon at source and destination
     # FIX: distances must also include the satnum of which sat put the lowest distance!  Must follow that listing backwards to id path to the source
-    global num_route_calc_failures, no_sat_overhead_cnt
+    if not do_multiprocessing:
+        global sat_object_list
+    else:
+      sat_object_list = local_sat_object_list
 
-    sat_found = False
+    #print(f"::find_route_dijkstra_hop:: Using sat_object_list; size: {len(sat_object_list)}")
+    #if len(sat_object_list) == 0:
+    #    sat_object_list = local_sat_object_list
+
+    src_routing_sat = None
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(src)):
-            sat_found = True
+            src_routing_sat = r_sat
             break # Just go with first satellite
-    if not sat_found:
+    if src_routing_sat is None:
         print(f"Unable to find satellite over source!")
-        no_sat_overhead_cnt += 1
-        return -1
-    src_routing_sat = r_sat
+        return -1, None, 'no_sat_overhead'
 
-    sat_found = False
+    dest_routing_sat = None
     for r_sat in sat_object_list:
         if (r_sat.is_overhead_of(dest)):
-            sat_found = True
+            dest_routing_sat = r_sat
             break # Just go with first satellite
-    if not sat_found:
+    if dest_routing_sat is None:
         print(f"Unable to find satellite over destination!")
-        no_sat_overhead_cnt += 1
-        return -1
-    dest_routing_sat = r_sat
+        return -1, None, 'no_sat_overhead'
+    
 
     visited_sat_dict = {} #(satnum, (distance, satnum_who_assigned_distance))
 
@@ -1823,8 +1835,7 @@ def find_route_dijkstra_hop(src, dest):
 
     #print("Starting Dijsktra Loop")
     while True:
-        if not do_multithreading:
-            print(f"Loop count: {loop_cnt}", end="\r")
+        print(f"Loop count: {loop_cnt}", end="\r")
         cur_sat_neigh_list = cur_sat.get_list_of_cur_sat_neighbors()
 
         # Set distances for adjancent satellites
@@ -1860,8 +1871,7 @@ def find_route_dijkstra_hop(src, dest):
         # Were there no nodes with distances other than infinity?  Something went wrong
         if next_hop_dist == float('inf'):
             print(f"No more neighbors without infinite distances to explore.  {len(visited_sat_dict)} visited nodes; {len(unvisted_sat_dict)} unvisted nodes remaining")
-            num_route_calc_failures += 1
-            return -1 
+            return -1, None, 'route_calc_failure'
 
         # Get sat routing object for indicated satnum
         cur_sat = get_routing_sat_obj_by_satnum(next_hop_satnum)
@@ -1870,8 +1880,7 @@ def find_route_dijkstra_hop(src, dest):
     # Done with loop; check if a route was found
     if not route_found:
         print(f"Unable to find route using dijkstra's algorithm")
-        num_route_calc_failures += 1
-        return -1
+        return -1, None, 'route_calc_failure'
     
     # Route was found, so retrace steps
     traverse_list = [dest_routing_sat.sat.model.satnum]
@@ -1881,8 +1890,7 @@ def find_route_dijkstra_hop(src, dest):
         next_hop = visited_sat_dict[cur_satnum][1]
         if next_hop == -1:
             print(f"::find_route_dijkstra_dist():: ERROR - no next_hop in visted_sat_dict!; cur_satnum: {cur_satnum} / visited_sat_dict: {visited_sat_dict}")
-            num_route_calc_failures += 1
-            return -1
+            return -1, None, 'route_calc_failure'
         link_distance += get_sat_distance(get_routing_sat_obj_by_satnum(cur_satnum).sat.at(cur_time), get_routing_sat_obj_by_satnum(next_hop).sat.at(cur_time))
         traverse_list.insert(0, next_hop)
         if next_hop == src_routing_sat.sat.model.satnum:
@@ -1891,7 +1899,11 @@ def find_route_dijkstra_hop(src, dest):
     traverse_list.reverse()
     packet = {'dest_satnum': traverse_list[0], 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest, 'TTL' : packet_start_TTL}
     # route pre-computed, now send packet
-    send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
+    if send_packet:
+        send_directed_routing_packet_from_source(traverse_list[-1], src, packet)
+        return None, None, ''
+    else:
+        return traverse_list[-1], packet, ''
 
 # ::: directed routing packet structure: [dest_satnum, [next_hop_list], [prev_hop_list], distance_traveled, dest_terminal] - packet is at destination when dest_satnum matches current_satnum and next_hop_list is empty
 def send_directed_routing_packet_from_source(starting_satnum, starting_terminal, packet):  # must have next_hop_list pre_built
@@ -2028,13 +2040,43 @@ def plot_objects_to_sphere(object_list):
     ax.plot_surface(x*r, y*r, z*r)
     plt.show()
 
-def mt_find_route_dijkstra_hop(thread_num, src, dest, results):
-    results[thread_num] = find_route_dijkstra_hop(src, dest)
+def init_worker_processes(_sat_object_list):
+    global local_sat_object_list
+    local_sat_object_list = _sat_object_list
 
+def mp_find_route_dijkstra_hop(proc_index, raw_packet, local_sat_object_list, results):
+    src, dest = raw_packet
+    #print(f"::mt_find_route_dijkstra_hop:: received src: {src}, dest {dest}, sat_object_list size: {len(local_sat_object_list)}")
+    src_satnum, packet, error_str = find_route_dijkstra_hop(src, dest, False, local_sat_object_list)
+    print(f"::mp_find_route_dijkstra_hop:: calculated src_satnum: {src_satnum}")
+    #packets_to_send.put((src_satnum, src, packet))
+    results.put((src_satnum, src, packet, error_str))
+
+def mt_find_route_dijkstra_hop(thread_index, raw_packet):
+    global no_sat_overhead_cnt, num_route_calc_failures, num_packets_dropped
+    src, dest = raw_packet
+    #print(f"::mt_find_route_dijkstra_hop:: received src: {src}, dest {dest}, sat_object_list size: {len(local_sat_object_list)}")
+    print(f"::mt_find_route_dijkstra_hop:: starting thread {thread_index}")
+    satnum, _, error_str = find_route_dijkstra_hop(src, dest)
+    if satnum == -1:
+        num_packets_dropped += 1
+        if error_str == 'no_sat_overhead':
+            no_sat_overhead_cnt += 1
+        elif error_str == 'route_calc_failure':
+            num_route_calc_failures += 1
+    
 
 def directed_dijkstra_hop_routing():
-    global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name
+    global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name, num_route_calc_failures, sat_object_list
     name = "Directed Dijkstra Hop"
+
+    #if do_multithreading:
+    #    def my_callback(result):
+    #        src_satnum, src, packet = result
+    #        if src_satnum == -1:
+    #            num_packets_dropped += 1
+    #        else:
+    #            send_directed_routing_packet_from_source(src_satnum, src, packet)
 
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
     for _ in range(max_time_inverals):
@@ -2042,37 +2084,63 @@ def directed_dijkstra_hop_routing():
             packet_send_list = packet_schedule[cur_time_increment]  # get list of packets to send for this time interval
             packet_num = 0
             packet_send_list_size = len(packet_send_list)
-            print(f"::directed_dijkstra_hop_routing:: Sending packets for time interval {cur_time_increment} of {len(packet_schedule)}")
-            if do_multithreading:
+            print(f"::directed_dijkstra_hop_routing:: Sending packets for time interval {cur_time_increment}; {len(packet_schedule)-1} remaining")
+            if do_multiprocessing:
+                process_list = []
+                results = mp.Queue()
                 packet_index = 0
-                while packet_index != packet_send_list_size:
-                    thread_list = [None] * num_threads
-                    results = [None] * num_threads
-                    for thread_index in range(num_threads):
+                while(packet_index < packet_send_list_size):
+                    for proc_index in range(num_threads):
                         if packet_index == packet_send_list_size:
                             break
+                        p = mp.Process(target=mp_find_route_dijkstra_hop, args=(proc_index, packet_send_list[packet_index], sat_object_list, results))
+                        process_list.append(p)
+                        p.start()
                         num_packets_sent += 1
-                        src, dest = packet_send_list[packet_index]
-                        thread_list[thread_index] = threading.Thread(target=mt_find_route_dijkstra_hop, args=(thread_index, src, dest, results,))
-                        print(f"::directed_dijkstra_hop_routing:: Thread {thread_index} calculating packet route {packet_index} of {packet_send_list_size} using Dijkstra Hop")
-                        thread_list[thread_index].start()
                         packet_index += 1
-                    for i in range(0, thread_index+1): # going only up to value of thread_index as loop may have terminated before reaching num_threads
-                        if not thread_list[i] is None:
-                            thread_list[i].join()
-                            print(f"::directed_dijkstra_hop_routing:: Thread {i} completed packet route")
-                    for i in results:
-                        if i == -1:
-                            num_packets_dropped += 1
+
+                    for p in process_list:
+                        p.join()
+                
+                while not results.empty():
+                    result = results.get()
+                    src_satnum, src, packet, error_str = result
+                    if src_satnum == -1:
+                        num_packets_dropped += 1
+                        if error_str == 'no_sat_overhead':
+                            no_sat_overhead_cnt += 1
+                        elif error_str == 'route_calc_failure':
+                            num_route_calc_failures += 1
+                    else:
+                        send_directed_routing_packet_from_source(src_satnum, src, packet)
+            elif (do_multithreading):
+                thread_list = []
+                packet_index = 0
+                while(packet_index < packet_send_list_size):
+                    for thread_index in range (num_threads):
+                        if packet_index == packet_send_list_size:
+                            break
+                        t = threading.Thread(target=mt_find_route_dijkstra_hop, args=(thread_index, packet_send_list[packet_index]))
+                        thread_list.append(t)
+                        t.start()
+                        num_packets_sent += 1
+                        packet_index += 1
+                    for t in thread_list:
+                        t.join()
             else:
                 for packet in packet_send_list:
                     num_packets_sent += 1
                     src, dest = packet
                     print(f"Sending directed packet {packet_num} of {packet_send_list_size} using Dijkstra Hop")
                     packet_num += 1
-                    if find_route_dijkstra_hop(src, dest) == -1:  # call pre-calculate routing routing
+                    src_satnum, packet, error_str = find_route_dijkstra_hop(src, dest)
+                    if  src_satnum == -1:  # call pre-calculate routing routing
                         #print(f"Unable to find route to {src}", end='\r') # if route from source to destination not found, drop packet
                         num_packets_dropped += 1
+                        if error_str == 'no_sat_overhead':
+                            no_sat_overhead_cnt += 1
+                        elif error_str == 'route_calc_failure':
+                            num_route_calc_failures += 1
             print(f"::directed_dijkstra_hop_routing:: Completed sending packets for time interval {cur_time_increment}")
             del packet_schedule[cur_time_increment] # remove this time increment from packet scheduler
         # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
@@ -2562,12 +2630,17 @@ def static_build_packet_schedule():
             if packet_cnt == 0:
                 packet_schedule[interval] = []
             # determine which traffic category it will be
-            index1 = (num_time_intervals + packets_generated_per_interval + (3*packet_cnt)) % len(city_list)
-            index2 = (num_time_intervals + interval + packets_generated_per_interval + (2*packet_cnt) + 3) % len(city_list)
-            if packet_cnt % 2 == 0:
-                    packet_schedule[interval].append((city_list[index1], city_list[index2]))
+            if test_point_to_point:
+                index1 = 1
+                index2 = -1
+                packet_schedule[interval].append((city_list[index1], city_list[index2]))
             else:
-                    packet_schedule[interval].append((city_list[index2], city_list[index1]))
+                index1 = (num_time_intervals + packets_generated_per_interval + (3*packet_cnt)) % len(city_list)
+                index2 = (num_time_intervals + interval + packets_generated_per_interval + (2*packet_cnt) + 3) % len(city_list)
+                if packet_cnt % 2 == 0:
+                        packet_schedule[interval].append((city_list[index1], city_list[index2]))
+                else:
+                        packet_schedule[interval].append((city_list[index2], city_list[index1]))
             
 
 def print_global_counters():
@@ -2578,12 +2651,16 @@ def print_global_counters():
     print(f"Total packets dropped: {num_packets_dropped}")
     print(f"  Number of packets dropped due to exceeding max hops: {num_max_hop_packets_dropped}")
     print(f"  Number of packets dropped due to no satellite overhead source: {no_sat_overhead_cnt}")
-    print(f"Number of route calculation failures: {num_route_calc_failures}") # this is essentially max_hop_packets_dropped for directed routing functions
+    print(f"  Number of route calculation failures: {num_route_calc_failures}") # this is essentially max_hop_packets_dropped for directed routing functions
     for r_sat in sat_object_list:
         if r_sat.congestion_cnt > 0:
             print(f"Satellite {r_sat.sat.model.satnum} congestion count: {r_sat.congestion_cnt}")
-    print(f"Average packet distance: {total_distance_traveled//num_packets_received:,.0f}")
-    print(f"Average packet hop count: {total_hop_count//num_packets_received}")
+    if num_packets_received != 0:
+        print(f"Average packet distance: {total_distance_traveled//num_packets_received:,.0f}")
+        print(f"Average packet hop count: {total_hop_count//num_packets_received}")
+    else:
+        print(f"No packets received!")
+    
 
 # ::::::: TESTING FUNCTIONS :::::::
 def print_all_satellite_neighbors():
@@ -2630,6 +2707,7 @@ def main ():
         print(f"    Running with {num_threads} threads")
     print(f"  Draw static orbits: {draw_static_orbits}")
     print(f"  Draw distributed orbits: {draw_distributed_orbits}")
+    print(f"  Do test_point_to_point: {test_point_to_point}")
     print(f"  Testing: {testing}")
     print(f"  Plot dropped packets: {plot_dropped_packets}")
     print(f"  Doing satellite disruptions: {do_disruptions}")
@@ -2649,9 +2727,16 @@ def main ():
     # ---------- ROUTING ------------   
 
     # build a schedule of packets to send
-    #build_packet_schedule()
-    #alt_build_packet_schedule()
-    static_build_packet_schedule()
+    if packet_schedule_method == 'static':
+        static_build_packet_schedule()
+    elif packet_schedule_method == 'random':
+        build_packet_schedule()
+    elif packet_schedule_method == 'alt_random':
+        alt_build_packet_schedule()
+    else:
+        print(f"Unkown packet schedule method specified: {packet_schedule_method}")
+        exit()
+    
 
     if do_disruptions:
         build_disruption_schedule() # build a schedule of satellite disruptions
