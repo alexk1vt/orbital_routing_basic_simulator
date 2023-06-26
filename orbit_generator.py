@@ -31,7 +31,7 @@ do_multithreading = True
 do_multiprocessing = False # Doesn't work -- multiprocessing takes precedence over multithreading where appropriate
 draw_static_orbits = False
 draw_distributed_orbits = False
-testing = False
+test_name = "None" # options: "None", "Print Sat Neighbors Over Time"
 plot_dropped_packets = False
 do_disruptions = False
 max_disruptions_per_time_interval = -1 #5
@@ -41,6 +41,7 @@ packet_schedule_method_options = ["random", "alt_random", "static"]
 test_point_to_point = False # routes repeatedly between two static locations over specified time intervals -- MUST BE SET FOR 'STATIC' PACKET SCHEDULE METHOD
 routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"
 routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"]
+testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time"]
 
 # Orbit characteristics
 # Starlink Shell 1:  https://everydayastronaut.com/starlink-group-6-1-falcon-9-block-5-2/
@@ -2936,11 +2937,51 @@ def print_all_satellite_neighbors():
         print(f"Satellite {r_sat.sat.model.satnum} neighbors= fore: {r_sat.fore_sat_satnum}, aft: {r_sat.aft_sat_satnum}, port: {r_sat.port_sat_satnum}, starboard: {r_sat.starboard_sat_satnum}, fore_port: {r_sat.fore_port_sat_satnum}, fore_starboard: {r_sat.fore_starboard_sat_satnum}, aft_port: {r_sat.aft_port_sat_satnum}, aft_starboard: {r_sat.aft_starboard_sat_satnum}")
 
 def print_satellite_neighbors_over_time(r_sat, num_time_increments):
+    print("::::: SATELLITE NEIGHBORS OVER TIME :::::")
+    print("Satellite number,\tLatitude,\tFore,\tAft,\tPort,\tStarboard,\tFore Port,\tFore Starboard,\tAft Port,\tAft Starboard")
     for _ in range(num_time_increments):
         r_sat.update_current_neighbor_sats()
         lat = r_sat.get_sat_lat_degrees()
-        print(f"Satellite {r_sat.sat.model.satnum} neighbors at lat {lat:.2f}= fore: {r_sat.fore_sat_satnum}, aft: {r_sat.aft_sat_satnum}, port: {r_sat.port_sat_satnum}, starboard: {r_sat.starboard_sat_satnum}, fore_port: {r_sat.fore_port_sat_satnum}, fore_starboard: {r_sat.fore_starboard_sat_satnum}, aft_port: {r_sat.aft_port_sat_satnum}, aft_starboard: {r_sat.aft_starboard_sat_satnum}")
+        print(f"{r_sat.sat.model.satnum},\t\t\t{lat:.2f},\t\t{r_sat.fore_sat_satnum},\t{r_sat.aft_sat_satnum},\t{r_sat.port_sat_satnum},\t{r_sat.starboard_sat_satnum},\t\t{r_sat.fore_port_sat_satnum},\t\t{r_sat.fore_starboard_sat_satnum},\t\t{r_sat.aft_port_sat_satnum},\t\t{r_sat.aft_starboard_sat_satnum}")
         increment_time()
+
+
+def print_satellite_neighbor_bearings_over_time(r_sat, num_time_increments):
+    print("::::: SATELLITE NEIGHBOR BEARINGS OVER TIME :::::")
+    print("Satellite number,Latitude,Fore,Aft,Port,Starboard,Fore Port,Fore Starboard,Aft Port,Aft Starboard")
+    for _ in range(num_time_increments):
+        r_sat.update_current_neighbor_sats()
+        cur_sat_heading = get_heading_by_satnum_degrees(r_sat.sat.model.satnum)
+        lat = r_sat.get_sat_lat_degrees()
+        fore_bearing = None
+        aft_bearing = None
+        port_bearing = None
+        starboard_bearing = None
+        fore_port_bearing = None
+        fore_starboard_bearing = None
+        aft_port_bearing = None
+        aft_starboard_bearing = None
+        if r_sat.fore_sat_satnum != None:
+            fore_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_sat_satnum, cur_sat_heading) 
+            if fore_bearing > 180:
+                fore_bearing -= 360
+        if r_sat.aft_sat_satnum != None:
+            aft_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_sat_satnum, cur_sat_heading) - 180
+        if r_sat.port_sat_satnum != None:
+            port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.port_sat_satnum, cur_sat_heading) - port_interface_bearing
+        if r_sat.starboard_sat_satnum != None:
+            starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.starboard_sat_satnum, cur_sat_heading) - starboard_interface_bearing
+        if r_sat.fore_port_sat_satnum != None:
+            fore_port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_port_sat_satnum, cur_sat_heading) - fore_port_interface_bearing
+        if r_sat.fore_starboard_sat_satnum != None:
+            fore_starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_starboard_sat_satnum, cur_sat_heading) - fore_starboard_interface_bearing
+        if r_sat.aft_port_sat_satnum != None:
+            aft_port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_port_sat_satnum, cur_sat_heading) - aft_port_interface_bearing
+        if r_sat.aft_starboard_sat_satnum != None:
+            aft_starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_starboard_sat_satnum, cur_sat_heading) - aft_starboard_interface_bearing
+        print(f"{r_sat.sat.model.satnum},{lat:.2f},{fore_bearing},{aft_bearing},{port_bearing},{starboard_bearing},{fore_port_bearing},{fore_starboard_bearing},{aft_port_bearing},{aft_starboard_bearing}")
+        increment_time()
+# ::::::: END TESTING FUNCTIONS :::::::
 
 def print_configured_options():
     print("::Configured Options::")
@@ -2951,7 +2992,7 @@ def print_configured_options():
     print(f"  Draw static orbits: {draw_static_orbits}")
     print(f"  Draw distributed orbits: {draw_distributed_orbits}")
     print(f"  Do test_point_to_point: {test_point_to_point}")
-    print(f"  Testing: {testing}")
+    print(f"  Test name: {test_name}")
     print(f"  Plot dropped packets: {plot_dropped_packets}")
     print(f"  Do satellite disruptions: {do_disruptions}")
     if max_disruptions_per_time_interval < 0:
@@ -2980,15 +3021,17 @@ def print_help(options, long_options, option_explanation):
             print(f"      Routing methods: {routing_name_options}")
         elif pruned_options[i] == 'c':
             print(f"      Packet scheduling methods: {packet_schedule_method_options}")
+        elif pruned_options[i] == 't':
+            print(f"      Test numbers: {testing_name_options}")
     print("Default options:")
     print_configured_options()
 
 # Process command line arguments and set global variables as appropriate
 def process_command_line_arguments():
     argumentList = sys.argv[1:]
-    options = "hmutpr:i:n:odasc:k:qx:"
-    long_options = ["help", "multithreaded", "multiprocessing", "test", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "max_disruptions_per_interval"]
-    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "run testing functions", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify max number of disruptions per time interval (-1 for static disruptions)"]
+    options = "hmut:pr:i:n:odasc:k:qx:"
+    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "max_disruptions_per_interval"]
+    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify max number of disruptions per time interval (-1 for static disruptions)"]
     try:
         arguments, values = getopt.getopt(argumentList, options, long_options)
     except getopt.error as err:
@@ -3004,9 +3047,9 @@ def process_command_line_arguments():
         elif currentArgument in ("-u", "--multiprocessing"):
             global do_multiprocessing
             do_multiprocessing = True
-        elif currentArgument in ("-t", "--test"):
-            global testing
-            testing = True
+        elif currentArgument in ("-t", "--test_name"):
+            global test_name
+            test_name = currentValue
         elif currentArgument in ("-p", "--point_to_point"):
             global test_point_to_point
             test_point_to_point = True
@@ -3078,13 +3121,23 @@ def main ():
     
 
     # ---------- TESTING ------------
-    """
-    target_satnum = 1003
-    set_time_interval(120) # set time interval to 60 seconds
-    num_time_increments = 90
-    print_satellite_neighbors_over_time(sat_object_list[target_satnum], num_time_increments)
-    exit ()
-    """
+    
+    if test_name == "None":
+        pass
+    elif test_name == "Print Sat Neighbors Over Time":
+        target_satnum = 1003
+        #set_time_interval(120) # set time interval to 60 seconds
+        #num_time_increments = 90
+        print_satellite_neighbors_over_time(sat_object_list[target_satnum], num_time_intervals)
+        exit ()
+    elif test_name == "Print Sat Neighbor Bearings Over Time":
+        target_satnum = 1003
+        print_satellite_neighbor_bearings_over_time(sat_object_list[target_satnum], num_time_intervals)
+        exit ()
+    else:
+        print(f"Unkown test name specified: {test_name}")
+        exit()
+    
     # ---------- ROUTING ------------   
 
     # build a schedule of packets to send
