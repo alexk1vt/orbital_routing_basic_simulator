@@ -37,14 +37,16 @@ draw_distributed_orbits = False
 test_name = "None" # options: "None", "Print Sat Neighbors Over Time"
 plot_dropped_packets = False
 do_disruptions = False
-max_disruptions_per_time_interval = -1 #5
+max_disruptions_per_time_interval = 5
+disruption_schedule_method = "random" # "random", "static", "file"
+disruption_schedule_method_options = ["random", "static", "file"]
 do_qos = False # QoS things like congestion control
-packet_schedule_method = "static" # "random", "alt_random", "static"
+packet_schedule_method = "static" # "random", "alt_random", "static", "file"
 packet_schedule_method_options = ["random", "alt_random", "static", "file"]
 test_point_to_point = False # routes repeatedly between two static locations over specified time intervals -- MUST BE SET FOR 'STATIC' PACKET SCHEDULE METHOD
 routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"
 routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Directed Dijkstar Hop", "Directed Dijkstar Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"]
-testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time", "Dump Packet Schedule to File", "Load Packet Schedule From File"]
+testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time", "Dump Packet Schedule to File", "Load Packet Schedule From File", "Dump Disruption Schedule to File", "Load Disruption Schedule From File"]
 csv_output = None
 
 # Orbit characteristics
@@ -2640,8 +2642,8 @@ def distributed_link_state_routing():
         print(f"Failed to send all packets in schedule.  {len(packet_schedule)} packets remaining in schedule")
     if not (num_packets_received + num_packets_dropped == num_packets_sent):
         print("Some packets unaccounted for!!")
-        
-def build_disruption_schedule():
+
+def build_disruption_schedule_static():
     # select satellites randomly and for random durations (short) to disrupt
     # disruptions are enabled/disabled during time increments
     # satellites can either be set 'disrupted' by scheduler or
@@ -2672,54 +2674,84 @@ def build_disruption_schedule():
         num_sat_disruptions = 0
         num_region_disruptions = 0
         disruption_schedule[interval] = []
-        if max_disruptions_per_time_interval < 0: # static disruption schedule
-            africa = wgs84.latlon(0.1 * N, 21.19 * E)
-            europe = wgs84.latlon(48.8566 * N, 2.3522 * E)
-            north_america = wgs84.latlon(36 * N, 81.5 * W)
-            south_america = wgs84.latlon(10.5 * S, 62.4 * W)
-            asia = wgs84.latlon(41 * N, 74.5 * E)
-            australia = wgs84.latlon(19.24 * S, 145.5 * E)
-            region_list = [africa, europe, north_america, south_america, asia, australia]
+        africa = wgs84.latlon(0.1 * N, 21.19 * E)
+        europe = wgs84.latlon(48.8566 * N, 2.3522 * E)
+        north_america = wgs84.latlon(36 * N, 81.5 * W)
+        south_america = wgs84.latlon(10.5 * S, 62.4 * W)
+        asia = wgs84.latlon(41 * N, 74.5 * E)
+        australia = wgs84.latlon(19.24 * S, 145.5 * E)
+        region_list = [africa, europe, north_america, south_america, asia, australia]
 
-            # IMPLEMENT THIS!!
-            # odd time intervals will have more disruptions, even time intervals will have less
-            num_disruptions = 3 + ((interval % 2) * 2) # 3, 5, 3, 5, 3, 5, ...
-            for i in range(num_disruptions): # 0: link disruption, 1: satellite disruption, 2: region disruption, 3: multiple satellite disruption, 4: link disruption
-                if i == 0:
-                    # link disruption
-                    link_num = 3 + (interval % 2)
-                    sat = (num_sats // (interval+1)) + (num_sats % num_time_intervals) - ((interval % 2) * 2) # trying to vary the affected satellite numbers
-                    duration = 1 + (interval % 3)
-                    disruption_schedule[interval].append(('link'+str(link_num), sat, duration))
-                    num_link_disruptions += 1
-                elif i == 1:
-                    # satellite disruption
-                    sat = (num_sats // (num_time_intervals)) + (num_sats % ((num_time_intervals*2) + interval)) - ((interval % 2) * 2) # trying to vary the affected satellite numbers
-                    duration = 3 - (interval % 3)
-                    disruption_schedule[interval].append(('sat', sat, duration))
-                    num_sat_disruptions += 1
-                elif i == 2:
-                    # regional disruption
-                    region = region_list[(interval+num_time_intervals+num_disruptions) % len(region_list)]
-                    duration = 1 + (interval+num_time_intervals+num_disruptions) % 3
-                    disruption_schedule[interval].append(('reg', region, duration))
-                    num_region_disruptions += 1
-                elif i == 3:
-                    # multiple satellite disruption
-                    sat1 = (num_sats // (interval+1)) + (num_sats % num_time_intervals + interval + i) - ((interval % 2) * 2)
-                    sat2 = (num_sats // (num_time_intervals)) + (num_sats % ((num_time_intervals*2) + interval)) - ((interval+i+num_time_intervals % 3) * 2)
-                    duration = 1 + (interval+i+num_time_intervals) % 3
-                    disruption_schedule[interval].append(('sat', sat1, duration))
-                    disruption_schedule[interval].append(('sat', sat2, duration))
-                    num_sat_disruptions += 2
-                elif i == 4:
-                    # link disruption
-                    link_num = 1 + (interval % 2)
-                    sat = (num_sats // (interval + num_disruptions + i)) + (num_sats % num_time_intervals) - ((interval % 2) * 2)
-                    duration = 1 + ((interval + i) % 3)
-                    disruption_schedule[interval].append(('link'+str(link_num), sat, duration))
-                    num_link_disruptions += 1            
-            continue
+        # odd time intervals will have more disruptions, even time intervals will have less
+        num_disruptions = 3 + ((interval % 2) * 2) # 3, 5, 3, 5, 3, 5, ...
+        for i in range(num_disruptions): # 0: link disruption, 1: satellite disruption, 2: region disruption, 3: multiple satellite disruption, 4: link disruption
+            if i == 0:
+                # link disruption
+                link_num = 3 + (interval % 2)
+                sat = (num_sats // (interval+1)) + (num_sats % num_time_intervals) - ((interval % 2) * 2) # trying to vary the affected satellite numbers
+                duration = 1 + (interval % 3)
+                disruption_schedule[interval].append(('link'+str(link_num), sat, duration))
+                num_link_disruptions += 1
+            elif i == 1:
+                # satellite disruption
+                sat = (num_sats // (num_time_intervals)) + (num_sats % ((num_time_intervals*2) + interval)) - ((interval % 2) * 2) # trying to vary the affected satellite numbers
+                duration = 3 - (interval % 3)
+                disruption_schedule[interval].append(('sat', sat, duration))
+                num_sat_disruptions += 1
+            elif i == 2:
+                # regional disruption
+                region = region_list[(interval+num_time_intervals+num_disruptions) % len(region_list)]
+                duration = 1 + (interval+num_time_intervals+num_disruptions) % 3
+                disruption_schedule[interval].append(('reg', region, duration))
+                num_region_disruptions += 1
+            elif i == 3:
+                # multiple satellite disruption
+                sat1 = (num_sats // (interval+1)) + (num_sats % num_time_intervals + interval + i) - ((interval % 2) * 2)
+                sat2 = (num_sats // (num_time_intervals)) + (num_sats % ((num_time_intervals*2) + interval)) - ((interval+i+num_time_intervals % 3) * 2)
+                duration = 1 + (interval+i+num_time_intervals) % 3
+                disruption_schedule[interval].append(('sat', sat1, duration))
+                disruption_schedule[interval].append(('sat', sat2, duration))
+                num_sat_disruptions += 2
+            elif i == 4:
+                # link disruption
+                link_num = 1 + (interval % 2)
+                sat = (num_sats // (interval + num_disruptions + i)) + (num_sats % num_time_intervals) - ((interval % 2) * 2)
+                duration = 1 + ((interval + i) % 3)
+                disruption_schedule[interval].append(('link'+str(link_num), sat, duration))
+                num_link_disruptions += 1            
+        continue
+
+def build_disruption_schedule_random():
+    # select satellites randomly and for random durations (short) to disrupt
+    # disruptions are enabled/disabled during time increments
+    # satellites can either be set 'disrupted' by scheduler or
+    # satellites can be disrupted by 'time intervals' when they are over a geographic region
+    # scheduler will need to decide:
+    #   1. a link, single satellite or geographic region
+    #   2. which link, satellite or region
+    #   3. and how long to disrupt
+    #disruption_schedule = {} # a dictionary with time interval integers as keys and lists of satellites or regions, along with time intervals, as values
+    # e.g. {0: [('sat', 443, 3), ('reg', GeographicPosition, 5), ('sat', 843, 1)]}
+    
+    # Disruption likelihood:
+    #   30% - No disruption
+    #   30% - Single link disruption
+    #   20% - Single satellite disruption
+    #   15% - Single region disruption
+    #    5% - Multiple satellite disruption (2 satellites)
+    # Disruption duration:
+    #   50% - 1 time interval
+    #   30% - 2 time intervals
+    #   20% - 3 time intervals
+    
+    global disruption_schedule, max_disruptions_per_time_interval
+
+    
+    for interval in range(num_time_intervals):
+        num_link_disruptions = 0
+        num_sat_disruptions = 0
+        num_region_disruptions = 0
+        disruption_schedule[interval] = []
         for _ in range(max_disruptions_per_time_interval):
             random_num = random.randint(0, 99)
             if random_num < 30:
@@ -2764,7 +2796,6 @@ def build_disruption_schedule():
                 num_sat_disruptions += 2
         print(f"::build_disruption_schedule:: {len(disruption_schedule[interval])} disruptions scheduled for time interval {interval}")
         print(f"\t{num_link_disruptions} link disruptions,\t{num_sat_disruptions} satellite disruptions,\t{num_region_disruptions} region disruptions")
-        input("\n\nPress Enter to continue...")
 
 def load_packet_schedule_from_file():
     # load the packet schedule from a file using dill
@@ -2804,6 +2835,43 @@ def dump_packet_schedule_to_file():
     with open(file_name, 'wb') as f:
         dill.dump((packet_schedule, schedule_details_dict), f)
         print(f"Dumped packet schedule to file {file_name}")
+
+def dump_disruption_schedule_to_file():
+    # dump the disruption schedule to a file using dill
+    import dill
+    global disruption_schedule
+
+    if not disruption_schedule:
+        print("Disruption schedule not yet built.  Building now...")
+        if disruption_schedule_method == 'random':
+            build_disruption_schedule_random()
+        elif disruption_schedule_method == 'static':
+            build_disruption_schedule_static()
+        else:
+            print(f"::dump_disruption_schedule_to_file:: Unknown disruption schedule method specified: {disruption_schedule_method}")
+            exit()
+
+    schedule_details_dict = {'num_intervals': num_time_intervals, 'max_disruptions_per_interval': max_disruptions_per_time_interval}
+    file_name = 'disruption_schedule.dill'
+    with open(file_name, 'wb') as f:
+        dill.dump((disruption_schedule, schedule_details_dict), f)
+        print(f"Dumped disruption schedule to file {file_name}")
+
+
+def load_disruption_schedule_from_file():
+    # load the disruption schedule from a file using dill
+    import dill
+    global num_time_intervals, disruption_schedule, max_disruptions_per_time_interval
+    file_name = 'disruption_schedule.dill'
+    with open(file_name, 'rb') as f:
+        disruption_schedule, schedule_details_dict = dill.load(f)
+        num_time_intervals = schedule_details_dict['num_intervals']
+        max_disruptions_per_time_interval = schedule_details_dict['max_disruptions_per_interval']
+        disruption_schedule_size = len(disruption_schedule)
+        print(f"Loaded disruption schedule of size {disruption_schedule_size} from file {file_name}")
+        print(f"Loaded the following schedule configuration:\n{schedule_details_dict}")
+        #print(f"disruption_schedule: {disruption_schedule}")
+
 
 # generate the list packet_schedule that contains a list of packets to be sent at each time interval
 def build_packet_schedule():
@@ -3267,16 +3335,18 @@ def print_help(options, long_options, option_explanation):
         elif pruned_options[i] == 'c':
             print(f"      Packet scheduling methods: {packet_schedule_method_options}")
         elif pruned_options[i] == 't':
-            print(f"      Test numbers: {testing_name_options}")
+            print(f"      Test options: {testing_name_options}")
+        elif pruned_options[i] == 'l':
+            print(f"      Disruption scheduling methods: {disruption_schedule_method_options}")
     print("Default options:")
     print_configured_options()
 
 # parse command line arguments and set global variables as appropriate
 def parse_command_line_arguments():
     argumentList = sys.argv[1:]
-    options = "hmut:pr:i:n:odasc:k:qx:v:"
-    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "max_disruptions_per_interval", "csv_output="]
-    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify max number of disruptions per time interval (-1 for static disruptions)", "specify csv output file name"]
+    options = "hmut:pr:i:n:odasc:k:ql:x:v:"
+    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "disruption_schedule_method=", "max_disruptions_per_interval", "csv_output="]
+    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify disruption scheduling method", "specify max number of disruptions per time interval", "specify csv output file name"]
     try:
         arguments, values = getopt.getopt(argumentList, options, long_options)
     except getopt.error as err:
@@ -3328,6 +3398,9 @@ def parse_command_line_arguments():
         elif currentArgument in ("-q", "--do_qos"):
             global do_qos
             do_qos = True
+        elif currentArgument in ("-l", "--disruption_schedule_method"):
+            global disruption_schedule_method
+            disruption_schedule_method = currentValue
         elif currentArgument in ("-x", "--max_disruptions_per_interval"):
             global max_disruptions_per_time_interval
             max_disruptions_per_time_interval = int(currentValue)
@@ -3388,6 +3461,10 @@ def main ():
             dump_packet_schedule_to_file()
         elif test_name == "Load Packet Schedule From File":
             load_packet_schedule_from_file()
+        elif test_name == "Dump Disruption Schedule to File":
+            dump_disruption_schedule_to_file()
+        elif test_name == "Load Disruption Schedule From File":
+            load_disruption_schedule_from_file()
         else:
             print(f"Unknown test name specified: {test_name}")
         if csv_output:
@@ -3395,7 +3472,7 @@ def main ():
             print(f"Closed csv file: {csv_output}")
         exit()
     
-    # ---------- ROUTING ------------   
+    # ---------- SCHEDULING ------------
 
     # build a schedule of packets to send
     if packet_schedule_method == 'static':
@@ -3410,12 +3487,19 @@ def main ():
         print(f"Unkown packet schedule method specified: {packet_schedule_method}")
         exit()
     
+    # ---------- DISRUPTING ------------
 
-    if do_disruptions:
-        build_disruption_schedule() # build a schedule of satellite disruptions
+    if do_disruptions:  # build a schedule of satellite disruptions
+        if disruption_schedule_method == 'random':
+            build_disruption_schedule_random()
+        elif disruption_schedule_method == 'file':
+            load_disruption_schedule_from_file()
+        elif disruption_schedule_method == 'static':
+            build_disruption_schedule_static()
+        
+    # ---------- ROUTING ------------
 
     # call routing algorithm to use to send packets
-
     if routing_name == "Directed Dijkstra Hop":
         directed_dijkstra_hop_routing()
     elif routing_name == "Directed Dijkstra Distance":
