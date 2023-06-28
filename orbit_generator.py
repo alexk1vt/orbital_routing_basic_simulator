@@ -3236,7 +3236,7 @@ def print_global_counters():
 
     print(string)
     if csv_output:
-        csv_file = open(csv_output+'.txt', 'w')
+        csv_file = open(csv_output+'counters.txt', 'w')
         csv_file.write(string)
         csv_file.close()
 
@@ -3308,31 +3308,36 @@ def print_satellite_neighbor_bearings_over_time(r_sat, num_time_increments):
 # ::::::: END TESTING FUNCTIONS :::::::
 
 def print_configured_options():
-    print("::Configured Options::")
-    print(f"  Multithreaded: {do_multithreading}")
-    print(f"  Multiprocessing: {do_multiprocessing}")
+    string = "::::: CONFIGURED OPTIONS :::::\n"
+    string += f"  Multithreaded: {do_multithreading}\n"
+    string += f"  Multiprocessing: {do_multiprocessing}\n"
     if do_multithreading or do_multiprocessing:
-        print(f"    Running with {num_threads} threads")
-    print(f"  Draw static orbits: {draw_static_orbits}")
-    print(f"  Draw distributed orbits: {draw_distributed_orbits}")
-    print(f"  Do test_point_to_point: {test_point_to_point}")
-    print(f"  Test name: {test_name}")
-    print(f"  Plot dropped packets: {plot_dropped_packets}")
-    print(f"  Do satellite disruptions: {do_disruptions}")
-    if max_disruptions_per_time_interval < 0:
-        print(f"    Max disruptions per interval: (static)")
-    else:
-        print(f"  Max disruptions per interval: {max_disruptions_per_time_interval}")
-    print(f"  Packet scheduling method: {packet_schedule_method}")
-    print(f"  Routing method: {routing_name}")
-    print(f"  Interval between time increments: {time_interval} seconds")
-    print(f"  Number of time intervals: {num_time_intervals}")
-    print(f"  Packets generated per interval: {packets_generated_per_interval}")
-    print(f"  Do QoS: {do_qos}")
+        string += f"    Running with {num_threads} threads\n"
+    string += f"  Draw static orbits: {draw_static_orbits}\n"
+    string += f"  Draw distributed orbits: {draw_distributed_orbits}\n"
+    string += f"  Do test_point_to_point: {test_point_to_point}\n"
+    string += f"  Test name: {test_name}\n"
+    string += f"  Plot dropped packets: {plot_dropped_packets}\n"
+    string += f"  Do satellite disruptions: {do_disruptions}\n"
+    string += f"  Satellite disruption method: {disruption_schedule_method}\n"
+    string += f"  Max disruptions per interval: {max_disruptions_per_time_interval}\n"
+    string += f"  Packet scheduling method: {packet_schedule_method}\n"
+    string += f"  Routing method: {routing_name}\n"
+    string += f"  Interval between time increments: {time_interval} seconds\n"
+    string += f"  Number of time intervals: {num_time_intervals}\n"
+    string += f"  Packets generated per interval: {packets_generated_per_interval}\n"
+    string += f"  Do QoS: {do_qos}\n"
     if csv_output:
-        print(f"  CSV output: {csv_output}")
+        string += f"  CSV output: {csv_output}\n"
     else:
-        print(f"  No CSV output")
+        string += f"  No CSV output\n"
+
+    print(string)
+
+    if csv_output:
+        csv_file = open(csv_output+'_config.txt', 'w')
+        csv_file.write(string)
+        csv_file.close()
 
 def print_help(options, long_options, option_explanation):
     pruned_options = []
