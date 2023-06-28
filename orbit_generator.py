@@ -2271,6 +2271,10 @@ def directed_dijkstar_distance_routing():
     from dijkstar import Graph, find_path
     global num_time_intervals, num_packets_sent, no_sat_overhead_cnt, num_route_calc_failures
 
+    if csv_output:
+        string = "satnum, num_hops, distance_traveled, transit_time"
+        csv_file.write(string + '\n')
+
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
     for _ in range(max_time_inverals):
         if cur_time_increment in packet_schedule:
@@ -2350,6 +2354,10 @@ def directed_dijkstar_distance_routing():
 def directed_dijkstar_hop_routing():
     from dijkstar import Graph, find_path
     global num_time_intervals, num_packets_sent, no_sat_overhead_cnt, num_route_calc_failures
+
+    if csv_output:
+        string = "satnum, num_hops, distance_traveled, transit_time"
+        csv_file.write(string + '\n')
 
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
     for _ in range(max_time_inverals):
@@ -3208,23 +3216,30 @@ def static_build_packet_schedule():
             
 
 def print_global_counters():
-    print(f"::::: GLOBAL COUNTERS :::::")
-    print(f"Routing Method: {routing_name}")
-    print(f"Total packets sent: {num_packets_sent}")
-    print(f"Total packets received: {num_packets_received}")
-    print(f"Total packets dropped: {num_packets_dropped}")
-    print(f"  Number of packets dropped due to exceeding max hops: {num_max_hop_packets_dropped}")
-    print(f"  Number of packets dropped due to no satellite overhead source: {no_sat_overhead_cnt}")
-    print(f"  Number of route calculation failures: {num_route_calc_failures}") # this is essentially max_hop_packets_dropped for directed routing functions
-    print(f"  Number of packets dropped due to TTL expiration: {num_max_TTL_packets_dropped}")
+    string = f"::::: GLOBAL COUNTERS :::::\n"
+    string += f"Routing Method: {routing_name}\n"
+    string += f"Total packets sent: {num_packets_sent}\n"
+    string += f"Total packets received: {num_packets_received}\n"
+    string += f"Total packets dropped: {num_packets_dropped}\n"
+    string += f"  Number of packets dropped due to exceeding max hops: {num_max_hop_packets_dropped}\n"
+    string += f"  Number of packets dropped due to no satellite overhead source: {no_sat_overhead_cnt}\n"
+    string += f"  Number of route calculation failures: {num_route_calc_failures}\n" # this is essentially max_hop_packets_dropped for directed routing functions
+    string += f"  Number of packets dropped due to TTL expiration: {num_max_TTL_packets_dropped}\n"
     for r_sat in sat_object_list:
         if r_sat.congestion_cnt > 0:
-            print(f"Satellite {r_sat.sat.model.satnum} congestion count: {r_sat.congestion_cnt}")
-    if num_packets_received != 0:
-        print(f"Average packet distance: {total_distance_traveled//num_packets_received:,.0f}")
-        print(f"Average packet hop count: {total_hop_count//num_packets_received}")
+            string += f"  Satellite {r_sat.sat_id} congestion count: {r_sat.congestion_cnt}\n"
+    if num_packets_received > 0:
+        string += f"Average packet distance: {total_distance_traveled // num_packets_received}\n"
+        string += f"Average packet hop count: {total_hop_count // num_packets_received}\n"
     else:
-        print(f"No packets received!")
+        string += f"No packets received!"
+
+    print(string)
+    if csv_output:
+        csv_file = open(csv_output+'.txt', 'w')
+        csv_file.write(string)
+        csv_file.close()
+
     
 
 # ::::::: TESTING FUNCTIONS :::::::
