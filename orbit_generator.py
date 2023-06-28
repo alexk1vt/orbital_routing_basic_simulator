@@ -2769,11 +2769,17 @@ def build_disruption_schedule():
 def load_packet_schedule_from_file():
     # load the packet schedule from a file using dill
     import dill
+    global num_time_intervals, time_interval, packets_generated_per_interval, packet_schedule
     file_name = 'packet_schedule.dill'
     with open(file_name, 'rb') as f:
-        packet_schedule = dill.load(f)
-        print(f"Loaded packet schedule from file {file_name}")
-        print(f"packet_schedule: {packet_schedule}")
+        packet_schedule, schedule_details_dict = dill.load(f)
+        num_time_intervals = schedule_details_dict['num_intervals']
+        time_interval = schedule_details_dict['time_interval']
+        packets_generated_per_interval = schedule_details_dict['num_packets_per_interval']
+        packet_schedule_size = len(packet_schedule)
+        print(f"Loaded packet schedule of size {packet_schedule_size} from file {file_name}")
+        print(f"Loaded the following schedule configuration:\n{schedule_details_dict}")
+        #print(f"packet_schedule: {packet_schedule}")
 
 def dump_packet_schedule_to_file():
     # dump the packet schedule to a file using dill
@@ -2793,9 +2799,10 @@ def dump_packet_schedule_to_file():
             print(f"Unkown packet schedule method specified: {packet_schedule_method}")
             exit()
 
+    schedule_details_dict = {'num_intervals': num_time_intervals, 'time_interval': time_interval,'num_packets_per_interval': packets_generated_per_interval}
     file_name = 'packet_schedule.dill'
     with open(file_name, 'wb') as f:
-        dill.dump(packet_schedule, f)
+        dill.dump((packet_schedule, schedule_details_dict), f)
         print(f"Dumped packet schedule to file {file_name}")
 
 # generate the list packet_schedule that contains a list of packets to be sent at each time interval
