@@ -23,6 +23,9 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
 from matplotlib.animation import FuncAnimation
 
+# CSV
+import csv
+
 # custom modules
 import tri_coordinates
 
@@ -37,11 +40,12 @@ do_disruptions = False
 max_disruptions_per_time_interval = -1 #5
 do_qos = False # QoS things like congestion control
 packet_schedule_method = "static" # "random", "alt_random", "static"
-packet_schedule_method_options = ["random", "alt_random", "static"]
+packet_schedule_method_options = ["random", "alt_random", "static", "file"]
 test_point_to_point = False # routes repeatedly between two static locations over specified time intervals -- MUST BE SET FOR 'STATIC' PACKET SCHEDULE METHOD
 routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"
-routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"]
-testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time"]
+routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Directed Dijkstar Hop", "Directed Dijkstar Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord"]
+testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time", "Dump Packet Schedule to File", "Load Packet Schedule From File"]
+csv_output = None
 
 # Orbit characteristics
 # Starlink Shell 1:  https://everydayastronaut.com/starlink-group-6-1-falcon-9-block-5-2/
@@ -56,6 +60,10 @@ packets_generated_per_interval = 20 # 100 # the number of packets generated per 
 
 # multiprocessing variables
 shm = None
+
+# CSV variables
+csv_file = None
+csv_writer = None
 
 # Multi threading
 num_threads = max(os.cpu_count()-2, 1) # 4
@@ -189,7 +197,7 @@ class RoutingSat:
                 self.update_neigh_state(congestion = True) # tell neighbors of congestion on-demand (this will be cleared next time interval if packet count is low enough)
                 self.congestion_cnt += 1
                 break
-            if 'dest_satnum' in packet:
+            if 'dest_satnum' in packet: # used by triCoord routing method
                 if packet['dest_satnum'] == self.sat.model.satnum:
                     #print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet received by destination satellite")
                     topo_position = (self.sat - packet['dest_gs']).at(cur_time)
@@ -201,8 +209,14 @@ class RoutingSat:
                         expected_min_hops = packet['expected_min_hops']
                         expected_max_hops = packet['expected_max_hops']
                         print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops (expected min: {expected_min_hops}/max: {expected_max_hops}).  Total distance: {int(distance_traveled):,.0f}km (transit time: {secs_per_km * int(distance_traveled):.2f} seconds)")
+                        if csv_output:
+                            string = f"{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{secs_per_km * int(distance_traveled):.2f},{expected_min_hops},{expected_max_hops}\n"
+                            csv_file.write(string)
                     else:
                         print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {secs_per_km * int(distance_traveled):.2f} seconds)")
+                        if csv_output:
+                            string = f"{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled):,.0f},{secs_per_km * int(distance_traveled):.2f}\n"
+                            csv_file.write(string)
                     #print(f"Packet traveled through sats: {packet['prev_hop_list']}")
                     num_packets_received += 1
                     total_distance_traveled += distance_traveled
@@ -214,7 +228,7 @@ class RoutingSat:
                     sent_packet = True
                     self.packets_sent_cnt += 1
                     continue
-            else:
+            else: # used by bearing routing method
                 if self.is_overhead_of(packet['dest_gs']): # Second, check if satellite is overhead destination ground station / terminal; deliver packet if so
                     print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet delivered to destination ground station / terminal")
                     topo_position = (self.sat - packet['dest_gs']).at(cur_time)
@@ -223,7 +237,10 @@ class RoutingSat:
                     distance_traveled = packet['distance_traveled']
                     hop_count = len(packet['prev_hop_list'])
                     print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {secs_per_km * int(distance_traveled):.2f} seconds)") # == source: {packet['source_gs']} -- destination: {packet['dest_gs']}")
-                    print(f"Packet traveled through sats: {packet['prev_hop_list']}")
+                    if csv_output:
+                        string = f"{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{secs_per_km * int(distance_traveled):.2f}\n"
+                        csv_file.write(string)
+                    #print(f"Packet traveled through sats: {packet['prev_hop_list']}")
                     num_packets_received += 1
                     total_distance_traveled += distance_traveled
                     total_hop_count += hop_count
@@ -299,6 +316,9 @@ class RoutingSat:
                 distance_traveled = packet['distance_traveled']
                 hop_count = len(packet['prev_hop_list'])
                 print(f"{self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {distance_traveled:,.0f}km (transit time: {secs_per_km * int(distance_traveled):.2f} seconds)")
+                if csv_output:
+                    string = f"{self.sat.model.satnum}, {hop_count}, {int(distance_traveled)}, {secs_per_km * int(distance_traveled):.2f}"
+                    csv_file.write(string + "\n")
                 if draw_static_orbits:
                     if len(packet['prev_hop_list']) > 30:
                         draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['dest_gs']], title=f"Directed_routing: {routing_name}, {hop_count} hops, total distance: {distance_traveled:,.0f}km", draw_lines = True, draw_sphere = True)
@@ -2236,7 +2256,7 @@ def mt_find_route_dijkstra_hop(thread_index, raw_packet):
     global no_sat_overhead_cnt, num_route_calc_failures, num_packets_dropped
     src, dest = raw_packet
     #print(f"::mt_find_route_dijkstra_hop:: received src: {src}, dest {dest}, sat_object_list size: {len(local_sat_object_list)}")
-    print(f"::mt_find_route_dijkstra_hop:: starting thread {thread_index}")
+    #print(f"::mt_find_route_dijkstra_hop:: starting thread {thread_index}")
     satnum, _, error_str = find_route_dijkstra_hop(src, dest)
     if satnum == -1:
         num_packets_dropped += 1
@@ -2245,10 +2265,172 @@ def mt_find_route_dijkstra_hop(thread_index, raw_packet):
         elif error_str == 'route_calc_failure':
             num_route_calc_failures += 1
     
+def directed_dijkstar_distance_routing():
+    from dijkstar import Graph, find_path
+    global num_time_intervals, num_packets_sent, no_sat_overhead_cnt, num_route_calc_failures
+
+    max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
+    for _ in range(max_time_inverals):
+        if cur_time_increment in packet_schedule:
+            # build the graph for this time iteration
+            print(f"::directed_dijkstar_distance_routing:: Building graph for time increment {cur_time_increment}")
+            graph = Graph()
+            for cur_sat in sat_object_list:
+                #graph.add_node(sat.satnum)
+                cur_sat_neigh_list = cur_sat.get_list_of_cur_sat_neighbors()
+                for neigh_r_sat in cur_sat_neigh_list:
+                    distance, _ = get_sat_distance_and_rate_by_satnum(cur_sat.satnum, neigh_r_sat.satnum)
+                    graph.add_edge(cur_sat.satnum, neigh_r_sat.sat.model.satnum, distance)
+            # Now process packets from the packet schedule
+            packet_send_list = packet_schedule[cur_time_increment]
+            packet_num = 0
+            packet_send_list_size = len(packet_send_list)
+            for packet in packet_send_list:
+                num_packets_sent += 1
+                src, dest = packet
+                print(f"::directed_dijkstar_distance_routing:: Sending directed packet {packet_num} of {packet_send_list_size} using Dijkstar distance")
+                packet_num += 1
+
+                # check for satellites overhead src and dest
+                src_routing_sat = None
+                for r_sat in sat_object_list:
+                    if (r_sat.is_overhead_of(src)):
+                        src_routing_sat = r_sat
+                        break # Just go with first satellite
+                dest_routing_sat = None
+                if not src_routing_sat is None:
+                    for r_sat in sat_object_list:
+                        if (r_sat.is_overhead_of(dest)):
+                            dest_routing_sat = r_sat
+                            break # Just go with first satellite
+                if (src_routing_sat is None) or (dest_routing_sat is None):
+                    print(f"::directed_dijkstar_distance_routing:: Unable to find satellite over destination!")
+                    no_sat_overhead_cnt += 1
+                    continue
+
+                # find the route between src and dest satellites
+                try:
+                    print(f"::directed_dijkstar_distance_routing:: Finding route between {src_routing_sat.satnum} and {dest_routing_sat.satnum} via dijkstar")
+                    path = find_path(graph, src_routing_sat.satnum, dest_routing_sat.satnum)
+                except Exception as e:
+                    print(f"::directed_dijkstar_distance_routing:: Unable to find route between {src_routing_sat.satnum} and {dest_routing_sat.satnum}; error: {e}")
+                    num_route_calc_failures += 1
+                else:
+                    #print(f"::directed_dijkstar_distance_routing:: Path: {path.nodes}")
+                    traverse_list = path.nodes
+                    traverse_list.reverse() # reverse traverse list so the last item is the next hop
+                    
+                    packet = {'dest_satnum': dest_routing_sat.satnum, 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest, 'TTL' : packet_start_TTL}
+                    # route pre-computed, now send packet
+                    send_directed_routing_packet_from_source(src_routing_sat.satnum, src, packet)
+                
+            del packet_schedule[cur_time_increment] # remove this time increment from packet scheduler
+
+        # Finished working through packet scheduler, now process any packets in satellite queues
+        packets_sent = True
+        # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
+        while (packets_sent):
+            packets_sent = False
+            for routing_sat in sat_object_list:  # loop through all satellites and send packets
+                if routing_sat.directed_routing_process_packet_queue() == 0: # if packets were sent, function returns 0
+                    packets_sent = True
+        if (len(packet_schedule) == 0) and (num_packets_received + num_packets_dropped == num_packets_sent):
+            print("All packets sent and accounted for.  Terminating simulation")
+            break
+        increment_time() # go to next time increment and start loop over
+    # looping simulation is finished
+    if len(packet_schedule) > 0:
+        print("Failed to send all packets in schedule.  Terminating simulation")
+        print(f"What is remaining in packet schedule:\n{packet_schedule}")
+    if not (num_packets_received + num_packets_dropped == num_packets_sent):
+        print("Some packets unaccounted for!!  Terminating simulation")
+
+def directed_dijkstar_hop_routing():
+    from dijkstar import Graph, find_path
+    global num_time_intervals, num_packets_sent, no_sat_overhead_cnt, num_route_calc_failures
+
+    max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
+    for _ in range(max_time_inverals):
+        if cur_time_increment in packet_schedule:
+            # build the graph for this time iteration
+            print(f"::directed_dijkstar_hop_routing:: Building graph for time increment {cur_time_increment}")
+            graph = Graph()
+            for cur_sat in sat_object_list:
+                #graph.add_node(sat.satnum)
+                cur_sat_neigh_list = cur_sat.get_list_of_cur_sat_neighbors()
+                for neigh_r_sat in cur_sat_neigh_list:
+                    graph.add_edge(cur_sat.satnum, neigh_r_sat.sat.model.satnum, 1)
+            # Now process packets from the packet schedule
+            packet_send_list = packet_schedule[cur_time_increment]
+            packet_num = 0
+            packet_send_list_size = len(packet_send_list)
+            for packet in packet_send_list:
+                num_packets_sent += 1
+                src, dest = packet
+                print(f"::directed_dijkstar_hop_routing:: Sending directed packet {packet_num} of {packet_send_list_size} using Dijkstar Hop")
+                packet_num += 1
+
+                # check for satellites overhead src and dest
+                src_routing_sat = None
+                for r_sat in sat_object_list:
+                    if (r_sat.is_overhead_of(src)):
+                        src_routing_sat = r_sat
+                        break # Just go with first satellite
+                dest_routing_sat = None
+                if not src_routing_sat is None:
+                    for r_sat in sat_object_list:
+                        if (r_sat.is_overhead_of(dest)):
+                            dest_routing_sat = r_sat
+                            break # Just go with first satellite
+                if (src_routing_sat is None) or (dest_routing_sat is None):
+                    print(f"::directed_dijkstar_hop_routing:: Unable to find satellite over destination!")
+                    no_sat_overhead_cnt += 1
+                    continue
+
+                # find the route between src and dest satellites
+                try:
+                    print(f"::directed_dijkstar_hop_routing:: Finding route between {src_routing_sat.satnum} and {dest_routing_sat.satnum} via dijkstar")
+                    path = find_path(graph, src_routing_sat.satnum, dest_routing_sat.satnum)
+                except Exception as e:
+                    print(f"::directed_dijkstar_hop_routing:: Unable to find route between {src_routing_sat.satnum} and {dest_routing_sat.satnum}; error: {e}")
+                    num_route_calc_failures += 1
+                else:
+                    #print(f"::directed_dijkstar_hop_routing:: Path: {path.nodes}")
+                    traverse_list = path.nodes
+                    traverse_list.reverse() # reverse traverse list so the last item is the next hop
+                    
+                    packet = {'dest_satnum': dest_routing_sat.satnum, 'next_hop_list' : traverse_list[:-1], 'prev_hop_list' : [], 'distance_traveled' : 0, 'dest_gs' : dest, 'TTL' : packet_start_TTL}
+                    # route pre-computed, now send packet
+                    send_directed_routing_packet_from_source(src_routing_sat.satnum, src, packet)
+                
+            del packet_schedule[cur_time_increment] # remove this time increment from packet scheduler
+
+        # Finished working through packet scheduler, now process any packets in satellite queues
+        packets_sent = True
+        # keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
+        while (packets_sent):
+            packets_sent = False
+            for routing_sat in sat_object_list:  # loop through all satellites and send packets
+                if routing_sat.directed_routing_process_packet_queue() == 0: # if packets were sent, function returns 0
+                    packets_sent = True
+        if (len(packet_schedule) == 0) and (num_packets_received + num_packets_dropped == num_packets_sent):
+            print("All packets sent and accounted for.  Terminating simulation")
+            break
+        increment_time() # go to next time increment and start loop over
+    # looping simulation is finished
+    if len(packet_schedule) > 0:
+        print("Failed to send all packets in schedule.  Terminating simulation")
+        print(f"What is remaining in packet schedule:\n{packet_schedule}")
+    if not (num_packets_received + num_packets_dropped == num_packets_sent):
+        print("Some packets unaccounted for!!  Terminating simulation")
+
 
 def directed_dijkstra_hop_routing():
     global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name, num_route_calc_failures, sat_object_list, shm
     name = "Directed Dijkstra Hop"
+    if csv_output:
+        string = "satnum, num_hops, distance_traveled, transit_time"
+        csv_file.write(string + '\n')
 
     #if do_multithreading:
     #    def my_callback(result):
@@ -2364,6 +2546,10 @@ def directed_dijkstra_distance_routing():
     global no_sat_overhead_cnt, num_packets_dropped, num_packets_sent, cur_time_increment, routing_name
     name = "Directed Dijkstra Distance"
 
+    if csv_output:
+        string = "satnum, num_hops, distance_traveled, transit_time"
+        csv_file.write(string + '\n')
+
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
     for _ in range(max_time_inverals):
         if cur_time_increment in packet_schedule:
@@ -2401,6 +2587,12 @@ def distributed_link_state_routing():
     global num_packets_dropped, num_packets_sent
     #name = "Distributed Link State"
     print(f"Routing method: {routing_name}")
+    if csv_output:
+        if routing_name == "Distributed Link State TriCoord":
+            string = f"satnum,packet_ttl,num_hops,distance_traveled,transit_time,expected_min_hops,expected_max_hops"
+        elif routing_name == "Distributed Link State Bearing":
+            string = f"satnum,packet_ttl,num_hops,distance_traveled,transit_time"
+        csv_file.write(string + "\n")
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
     # Loop through all time interverals and perform the following operations:
     #   1. Send all packets scheduled by packet scheduler
@@ -2574,7 +2766,37 @@ def build_disruption_schedule():
         print(f"\t{num_link_disruptions} link disruptions,\t{num_sat_disruptions} satellite disruptions,\t{num_region_disruptions} region disruptions")
         input("\n\nPress Enter to continue...")
 
+def load_packet_schedule_from_file():
+    # load the packet schedule from a file using dill
+    import dill
+    file_name = 'packet_schedule.dill'
+    with open(file_name, 'rb') as f:
+        packet_schedule = dill.load(f)
+        print(f"Loaded packet schedule from file {file_name}")
+        print(f"packet_schedule: {packet_schedule}")
 
+def dump_packet_schedule_to_file():
+    # dump the packet schedule to a file using dill
+    import dill
+    global packet_schedule
+
+    if not packet_schedule:
+        print("Packet schedule not yet built.  Building now...")
+        # build a schedule of packets to send
+        if packet_schedule_method == 'static':
+            static_build_packet_schedule()
+        elif packet_schedule_method == 'random':
+            build_packet_schedule()
+        elif packet_schedule_method == 'alt_random':
+            alt_build_packet_schedule()
+        else:
+            print(f"Unkown packet schedule method specified: {packet_schedule_method}")
+            exit()
+
+    file_name = 'packet_schedule.dill'
+    with open(file_name, 'wb') as f:
+        dill.dump(packet_schedule, f)
+        print(f"Dumped packet schedule to file {file_name}")
 
 # generate the list packet_schedule that contains a list of packets to be sent at each time interval
 def build_packet_schedule():
@@ -2938,17 +3160,26 @@ def print_all_satellite_neighbors():
 
 def print_satellite_neighbors_over_time(r_sat, num_time_increments):
     print("::::: SATELLITE NEIGHBORS OVER TIME :::::")
-    print("Satellite number,\tLatitude,\tFore,\tAft,\tPort,\tStarboard,\tFore Port,\tFore Starboard,\tAft Port,\tAft Starboard")
+    string = "Satellite number,\tLatitude,\tFore,\tAft,\tPort,\tStarboard,\tFore Port,\tFore Starboard,\tAft Port,\tAft Starboard"
+    print(string)
+    if csv_output:
+        csv_file.write(string + "\n")
     for _ in range(num_time_increments):
         r_sat.update_current_neighbor_sats()
         lat = r_sat.get_sat_lat_degrees()
-        print(f"{r_sat.sat.model.satnum},\t\t\t{lat:.2f},\t\t{r_sat.fore_sat_satnum},\t{r_sat.aft_sat_satnum},\t{r_sat.port_sat_satnum},\t{r_sat.starboard_sat_satnum},\t\t{r_sat.fore_port_sat_satnum},\t\t{r_sat.fore_starboard_sat_satnum},\t\t{r_sat.aft_port_sat_satnum},\t\t{r_sat.aft_starboard_sat_satnum}")
+        string = f"{r_sat.sat.model.satnum},\t\t\t{lat:.2f},\t\t{r_sat.fore_sat_satnum},\t{r_sat.aft_sat_satnum},\t{r_sat.port_sat_satnum},\t{r_sat.starboard_sat_satnum},\t\t{r_sat.fore_port_sat_satnum},\t\t{r_sat.fore_starboard_sat_satnum},\t\t{r_sat.aft_port_sat_satnum},\t\t{r_sat.aft_starboard_sat_satnum}"
+        print(string)
+        if csv_output:
+            csv_file.write(string + "\n")
         increment_time()
 
 
 def print_satellite_neighbor_bearings_over_time(r_sat, num_time_increments):
     print("::::: SATELLITE NEIGHBOR BEARINGS OVER TIME :::::")
-    print("Satellite number,Latitude,Fore,Aft,Port,Starboard,Fore Port,Fore Starboard,Aft Port,Aft Starboard")
+    string = "Satellite number,\tLatitude,\tFore,\tAft,\tPort,\tStarboard,\tFore Port,\tFore Starboard,\tAft Port,\tAft Starboard"
+    print(string)
+    if csv_output:
+        csv_file.write(string + "\n")
     for _ in range(num_time_increments):
         r_sat.update_current_neighbor_sats()
         cur_sat_heading = get_heading_by_satnum_degrees(r_sat.sat.model.satnum)
@@ -2979,7 +3210,10 @@ def print_satellite_neighbor_bearings_over_time(r_sat, num_time_increments):
             aft_port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_port_sat_satnum, cur_sat_heading) - aft_port_interface_bearing
         if r_sat.aft_starboard_sat_satnum != None:
             aft_starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_starboard_sat_satnum, cur_sat_heading) - aft_starboard_interface_bearing
-        print(f"{r_sat.sat.model.satnum},{lat:.2f},{fore_bearing},{aft_bearing},{port_bearing},{starboard_bearing},{fore_port_bearing},{fore_starboard_bearing},{aft_port_bearing},{aft_starboard_bearing}")
+        string = f"{r_sat.sat.model.satnum},{lat:.2f},{fore_bearing},{aft_bearing},{port_bearing},{starboard_bearing},{fore_port_bearing},{fore_starboard_bearing},{aft_port_bearing},{aft_starboard_bearing}"
+        print(string)
+        if csv_output:
+            csv_file.write(string + "\n")
         increment_time()
 # ::::::: END TESTING FUNCTIONS :::::::
 
@@ -3005,6 +3239,10 @@ def print_configured_options():
     print(f"  Number of time intervals: {num_time_intervals}")
     print(f"  Packets generated per interval: {packets_generated_per_interval}")
     print(f"  Do QoS: {do_qos}")
+    if csv_output:
+        print(f"  CSV output: {csv_output}")
+    else:
+        print(f"  No CSV output")
 
 def print_help(options, long_options, option_explanation):
     pruned_options = []
@@ -3026,12 +3264,12 @@ def print_help(options, long_options, option_explanation):
     print("Default options:")
     print_configured_options()
 
-# Process command line arguments and set global variables as appropriate
-def process_command_line_arguments():
+# parse command line arguments and set global variables as appropriate
+def parse_command_line_arguments():
     argumentList = sys.argv[1:]
-    options = "hmut:pr:i:n:odasc:k:qx:"
-    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "max_disruptions_per_interval"]
-    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify max number of disruptions per time interval (-1 for static disruptions)"]
+    options = "hmut:pr:i:n:odasc:k:qx:v:"
+    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "max_disruptions_per_interval", "csv_output="]
+    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify max number of disruptions per time interval (-1 for static disruptions)", "specify csv output file name"]
     try:
         arguments, values = getopt.getopt(argumentList, options, long_options)
     except getopt.error as err:
@@ -3086,6 +3324,9 @@ def process_command_line_arguments():
         elif currentArgument in ("-x", "--max_disruptions_per_interval"):
             global max_disruptions_per_time_interval
             max_disruptions_per_time_interval = int(currentValue)
+        elif currentArgument in ("-v", "--csv_output"):
+            global csv_output
+            csv_output = currentValue
 
 # ::::::: MAIN :::::::
 def main ():
@@ -3105,37 +3346,46 @@ def main ():
     build_constellation(source_sat)
 
     # Initialize simulation start time
-    global cur_time, cur_time_next, routing_name
+    global cur_time, cur_time_next, routing_name, csv_output
 
     cur_time = time_scale.utc(2023, 5, 9, 0, 0, 0)
     cur_time_next = time_scale.utc(2023, 5, 9, 0, 0, 1)
     print(f"Set current time to: {cur_time.utc_jpl()}")
 
     # Accept Command Line Arguments
-    process_command_line_arguments()
+    parse_command_line_arguments()
 
 
     # Print out the configured options
     print_configured_options()
 
-    
+    if csv_output:
+        global csv_file, csv_writer
+        csv_file = open(csv_output, 'w')
+        
 
     # ---------- TESTING ------------
     
     if test_name == "None":
         pass
-    elif test_name == "Print Sat Neighbors Over Time":
-        target_satnum = 1003
-        #set_time_interval(120) # set time interval to 60 seconds
-        #num_time_increments = 90
-        print_satellite_neighbors_over_time(sat_object_list[target_satnum], num_time_intervals)
-        exit ()
-    elif test_name == "Print Sat Neighbor Bearings Over Time":
-        target_satnum = 1003
-        print_satellite_neighbor_bearings_over_time(sat_object_list[target_satnum], num_time_intervals)
-        exit ()
     else:
-        print(f"Unkown test name specified: {test_name}")
+        if test_name == "Print Sat Neighbors Over Time":
+            target_satnum = 1003
+            #set_time_interval(120) # set time interval to 60 seconds
+            #num_time_increments = 90
+            print_satellite_neighbors_over_time(sat_object_list[target_satnum], num_time_intervals)
+        elif test_name == "Print Sat Neighbor Bearings Over Time":
+            target_satnum = 1003
+            print_satellite_neighbor_bearings_over_time(sat_object_list[target_satnum], num_time_intervals)
+        elif test_name == "Dump Packet Schedule to File":
+            dump_packet_schedule_to_file()
+        elif test_name == "Load Packet Schedule From File":
+            load_packet_schedule_from_file()
+        else:
+            print(f"Unknown test name specified: {test_name}")
+        if csv_output:
+            csv_file.close()
+            print(f"Closed csv file: {csv_output}")
         exit()
     
     # ---------- ROUTING ------------   
@@ -3147,6 +3397,8 @@ def main ():
         build_packet_schedule()
     elif packet_schedule_method == 'alt_random':
         alt_build_packet_schedule()
+    elif packet_schedule_method == 'file':
+        load_packet_schedule_from_file()
     else:
         print(f"Unkown packet schedule method specified: {packet_schedule_method}")
         exit()
@@ -3161,6 +3413,10 @@ def main ():
         directed_dijkstra_hop_routing()
     elif routing_name == "Directed Dijkstra Distance":
         directed_dijkstra_distance_routing()
+    elif routing_name == "Directed Dijkstar Hop":
+        directed_dijkstar_hop_routing()
+    elif routing_name == "Directed Dijkstar Distance":
+        directed_dijkstar_distance_routing()
     elif routing_name == "Distributed Link State Bearing" or routing_name == "Distributed Link State TriCoord":
         distributed_link_state_routing()
     else:
@@ -3175,6 +3431,9 @@ def main ():
 
     full_run_time = time.time() - start_run_time
     print(f"Full run time for {routing_name}: {floor(full_run_time/60)} minutes and {full_run_time % 60:,.2f} seconds")
+    if csv_output:
+        csv_file.close()
+        print(f"Closed csv file: {csv_output}")
     exit ()
 
     
