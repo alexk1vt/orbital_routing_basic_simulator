@@ -672,14 +672,15 @@ class RoutingSat:
         
         # get lists of intra_zone_nodes and boundary_nodes
         intra_zone_node_list, boundary_node_list = self.motif_method_get_intra_zone_nodes() # lists contains tuples of (satnum, dist)
-        
+        zone_routing_table_satnums = intra_zone_node_list + boundary_node_list
         # if destination is in the same zone, return next hop from zone routing table
-        if dest_satnum in intra_zone_node_list:
+        if dest_satnum in zone_routing_table_satnums:
             return self.motif_method_get_next_hop_from_zone_routing_table(dest_satnum)
-        
+        # Otherwise:
         # If destination is not in the same zone, identify which boundary node is closest to the destination satellite
         min_hop_boundary_satnum = self.motif_method_get_min_hop_boundary_satnum(dest_satnum, boundary_node_list)
-        
+        if min_hop_boundary_satnum is None: # error in calculating min hop boundary satnum
+            return None
         # Identify next hop for target_satnum from zone_routing_table
         return self.motif_method_get_next_hop_from_zone_routing_table(min_hop_boundary_satnum)
         
@@ -1396,42 +1397,58 @@ class RoutingSat:
         
         return next_hop_satnum
     
+    # TODO: COME UP WITH METHOD TO NOT UPDATE TABLE UNLESS NECESSARY
+    # TODO:  IDENTIFY WHEN IT WOULD BE NECESSARY TO UPDATE TABLE!
     def motif_method_update_zone_routing_table(self):
         # get the list of current neighbors
         # get the neighbors of the neighbors (2 hops)
         
         # build list of neighbor sats to update
         neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
-        local_zone_routing_table = {}
+        
+        # clear old zone routing table entries and create temp zone routing table for temp storage
+        self.zone_routing_table.clear()
+        temp_zone_routing_table = {} # this dictionary is used to identify neighbor's neighbors that are accessible by two paths (this is what we want stored in the zone routing table)
 
         # calculate distance to each neighbor and update zone routing table
+        # create dictionary to store the neighbor dictionaries of neighbors
         neigh_neigh_dict_dict = {}
         for neigh_satnum in neigh_satnum_list:
             dist, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, neigh_satnum)
+            # create a direct entry containing only distance value for direct neighbors
             self.zone_routing_table[neigh_satnum] = dist
             # get the neighbors for each neighbor, calculate distance, update zone routing table
             neigh_sat_object = sat_object_list[neigh_satnum]
             neigh_neigh_satnum_list = neigh_sat_object.get_list_of_cur_neighbor_satnums()
+            # create dictionary to store the neighbors of this neighbor
             neigh_neigh_dict = {}
+            # for each of this neighbor's neighbors, calculate distance and store in neigh_neigh dictionary (key: neigh_neigh_satnum, value: distance)
             for neigh_neigh_satnum in neigh_neigh_satnum_list:
                 dist, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, neigh_neigh_satnum)
                 neigh_neigh_dict[neigh_neigh_satnum] = dist
+            # once done building dictionary of this neighbor's neighbors, add to neigh_neigh_dict_dict (key: neigh_satnum, value: neigh_neigh_dict)
             neigh_neigh_dict_dict[neigh_satnum] = neigh_neigh_dict
+        # Once finished finding all of our neighbor's neighbors and storing their distances,
+        # we need to find the neighbors of neighbors that are accessible by two paths
         for neigh_satnum in neigh_neigh_dict_dict.keys():
             neigh_neigh_dict = neigh_neigh_dict_dict[neigh_satnum]
             for neigh_neigh_satnum in neigh_neigh_dict.keys():
-                if not neigh_neigh_satnum in local_zone_routing_table.keys():
-                    neigh_dist, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, neigh_satnum)
+                if not neigh_neigh_satnum in temp_zone_routing_table.keys(): # haven't seen this satellite yet
+                    neigh_dist = self.zone_routing_table[neigh_satnum] # get the distance to direct neighbor that was already calculated
+                    neigh_neigh_dist = neigh_neigh_dict[neigh_neigh_satnum] # get the distance from the neighbor's neighbor to the direct neighbor
+                    temp_zone_routing_table[neigh_neigh_satnum] = (neigh_satnum, neigh_dist + neigh_neigh_dist) # store the combined distance and the neighbor's neighbor satnum into temp zone routing table
+                else: # satnum is already in temp_zone_routing_table, so we have two paths to this neighbor's neighbor
+                    path1_satnum = neigh_satnum # label this new path as path1 and assign it the satnum of the direct neighbor
+                    neigh_dist = self.zone_routing_table[neigh_satnum] # get the distance to direct neighbor that was already calculated
                     neigh_neigh_dist = neigh_neigh_dict[neigh_neigh_satnum]
-                    local_zone_routing_table[neigh_neigh_satnum] = (neigh_satnum, neigh_dist + neigh_neigh_dist)
-                else: # satnum is already in local_zone_routing_table
-                    path1_satnum = neigh_satnum
-                    neigh_dist, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, neigh_satnum)
-                    neigh_neigh_dist = neigh_neigh_dict[neigh_neigh_satnum]
-                    path1_dist = neigh_dist + neigh_neigh_dist
-                    (path2_satnum, path2_dist) = local_zone_routing_table[neigh_neigh_satnum]
+                    path1_dist = neigh_dist + neigh_neigh_dist # save the distance of path1
+                    (path2_satnum, path2_dist) = temp_zone_routing_table[neigh_neigh_satnum] # retrieve the previously seen path and label as path2 and save its distance
+                    if (not (type(path1_dist) is int or type(path1_dist) is float)or not (type(path2_dist) is int or type(path2_dist) is float)):
+                        print(f"::motif_method_update_zone_routing_table:: ERROR: path1_dist or path2_dist is not a number, path1_dist: {path1_dist}, path2_dist: {path2_dist}")
                     if path1_dist < path2_dist:
-                        self.zone_routing_table[neigh_neigh_satnum] = (path1_satnum, path2_satnum)
+                        self.zone_routing_table[neigh_neigh_satnum] = (path1_satnum, path2_satnum) # save the neighbor's neighbor satnum in the dictionary with a tuple of the two paths, the shortest path being the first entry
+                    else:
+                        self.zone_routing_table[neigh_neigh_satnum] = (path2_satnum, path1_satnum)
 
 
 
@@ -1439,6 +1456,19 @@ class RoutingSat:
         # return two lists:
         # 1. list of satnums in the same zone as self.sat that are _not_ boundary nodes
         # 2. list of satnums in the same zone as self.sat that _are_ boundary nodes
+
+        boundary_satnum_list = []
+        intra_zone_satnum_list = []
+        for zrt_satnum_entry in self.zone_routing_table.keys():
+            zrt_result = self.zone_routing_table[zrt_satnum_entry]
+            if type(zrt_result) is tuple:
+                # this is a boundary node
+                boundary_satnum_list.append(zrt_satnum_entry)
+            else:
+                # this is an intra-zone node
+                intra_zone_satnum_list.append(zrt_satnum_entry)
+        return intra_zone_satnum_list, boundary_satnum_list
+        """
         neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
         boundary_satnum_dist_list = []
         intra_zone_satnum_dist_list = []
@@ -1453,13 +1483,13 @@ class RoutingSat:
                     boundary_satnum_dist_list.append((neigh_neigh_satnum, dist))
             
         return intra_zone_satnum_dist_list, boundary_satnum_dist_list
+        """
 
     def motif_method_get_min_hop_boundary_satnum(self, target_satnum, boundary_node_list):
         target_routing_sat = sat_object_list[target_satnum]
         min_hop_boundary_satnum = -1
         min_hop_count = 1000000
-        for boundary_node_list_element in boundary_node_list:
-            boundary_satnum, _ = boundary_node_list_element
+        for boundary_satnum in boundary_node_list:
             boundary_routing_sat = sat_object_list[boundary_satnum]
             inter_orbit_hop_count = abs(target_routing_sat.orbit_number - boundary_routing_sat.orbit_number)
             intra_orbit_partial_hop_count = (target_routing_sat.sat_index - boundary_routing_sat.sat_index) % sats_per_orbit
@@ -1468,28 +1498,31 @@ class RoutingSat:
             if boundary_sat_hop_count < min_hop_count:
                 min_hop_count = boundary_sat_hop_count
                 min_hop_boundary_satnum = boundary_satnum
+        if min_hop_boundary_satnum == -1:
+            print(f"::motif_method_get_min_hop_boundary_satnum:: ERROR: min_hop_boundary_satnum is -1")
+            return None
         return min_hop_boundary_satnum
     
-    def motif_method_get_next_hop_from_zone_routing_table(self, target_satnum):
-        neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
+    def motif_method_get_next_hop_from_zone_routing_table(self, target_satnum):        
         if not target_satnum in self.zone_routing_table.keys():
-            print(f"::motif_method_get_next_hop_from_zome_routing_table:: ERROR: target_satnum {target_satnum} not in zone_routing_table.  Sat {self.sat.model.satnum} ZRT entries: {self.zone_routing_table.keys()}")
+            print(f"::motif_method_get_next_hop_from_zone_routing_table:: ERROR: target_satnum {target_satnum} not in zone_routing_table.  Sat {self.sat.model.satnum} -> ZRT entries: {self.zone_routing_table.keys()}")
             return None
         next_hop_result = self.zone_routing_table[target_satnum]
-        if type(next_hop_result) is tuple:
+        neigh_satnum_list = self.get_list_of_cur_neighbor_satnums() # verify the sat identified in the zone routing table is still an available neighbor (prob unnecessary)
+        if type(next_hop_result) is tuple: # target satnum was a neighbor's neighbor, find the neighbor that is still available
             next_hop_pri_satnum, next_hop_alt_satnum = next_hop_result
-            if next_hop_pri_satnum in neigh_satnum_list:
-                return next_hop_pri_satnum
+            if next_hop_pri_satnum in neigh_satnum_list: 
+                return next_hop_pri_satnum # primary neighbor is available, so use this path
             elif next_hop_alt_satnum in neigh_satnum_list:
-                return next_hop_alt_satnum
+                return next_hop_alt_satnum # alternate neighbor is available, so use this path
             else:
-                return None
+                return None # neither neighbor is available, so return None
         else:
-            next_hop_satnum = next_hop_result
+            next_hop_satnum = next_hop_result # target satnum was a direct neighor, so we got it's satnum
             if next_hop_satnum in neigh_satnum_list:
-                return next_hop_satnum
+                return next_hop_satnum # target satnum is available, so return it
             else:
-                return None
+                return None # target satnum is not available, so return None
 
 # End Routing sat class
 # From https://towardsdatascience.com/the-strange-size-of-python-objects-in-memory-ce87bdfbb97f
