@@ -39,11 +39,11 @@ plot_dropped_packets = False
 do_disruptions = False
 max_disruptions_per_time_interval = 5
 disruption_schedule_method = "random" # "random", "static", "percent", "file"
-disruption_schedule_method_options = ["random", "static", "percent", "file"]
+disruption_schedule_method_options = ["random", "static", "percent", "file", "type_I"]
 disruption_options_string = ""
 do_qos = False # QoS things like congestion control
 packet_schedule_method = "static" # "random", "alt_random", "static", "file"
-packet_schedule_method_options = ["random", "alt_random", "static", "file"]
+packet_schedule_method_options = ["random", "alt_random", "static", "file", "EW_equator", "EW_high_latitude", "NS_old_world", "NS_new_world"]
 test_point_to_point = False # routes repeatedly between two static locations over specified time intervals -- MUST BE SET FOR 'STATIC' PACKET SCHEDULE METHOD
 routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif"
 routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Directed Dijkstar Hop", "Directed Dijkstar Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif"]
@@ -128,6 +128,7 @@ interface_lateral_range = 90 #180
 interface_bandwidth_low_dist = 1000
 interface_bandwidth_low_rate = 1
 neigh_recent_down_time_window = time_interval * 2 # a neighbor has been down recently if it's less than two time intervals
+six_interface_names = ['fore', 'aft', 'fore_port', 'aft_port', 'fore_starboard', 'aft_starboard']
 
 # Link state distance metric values
 interface_dir_correct = 1
@@ -144,6 +145,84 @@ neigh_neigh_link_down = 4
 neigh_not_congested = 0
 neigh_recently_down = 1
 neigh_not_recently_down = 0
+
+# establish city bandwidth utilization and common routes - using: https://global-internet-map-2021.telegeography.com/
+# Ranked by internation bandwidth capacity
+Frankfurt = wgs84.latlon(50.1109 * N, 8.6821 * E) # 1
+London = wgs84.latlon(51.5072 * N, 0.1276 * W) # 2
+Amsterdam = wgs84.latlon(52.3667 * N, 4.8945 * E) # 3
+Paris = wgs84.latlon(48.8567 * N, 2.3508 * E) # 4
+Singapore = wgs84.latlon(1.3521 * N, 103.8198 * E) # 5
+Hong_Kong = wgs84.latlon(22.3193 * N, 114.1694 * E) # 6
+Stockholm = wgs84.latlon(59.3293 * N, 18.0686 * E) # 7
+Miami = wgs84.latlon(25.7617 * N, 80.1918 * W) # 8
+Marseille = wgs84.latlon(43.2964 * N, 5.3700 * E) # 9
+Los_Angeles = wgs84.latlon(34.0522 * N, 118.2437 * W) # 10
+New_York = wgs84.latlon(40.7128 * N, 74.0060 * W) # 11
+Vienna = wgs84.latlon(48.2082 * N, 16.3738 * E) # 12
+Moscow = wgs84.latlon(55.7558 * N, 37.6173 * E) # 13
+Milan = wgs84.latlon(45.4642 * N, 9.1900 * E) # 14
+Tokyo = wgs84.latlon(35.6762 * N, 139.6503 * E) # 15
+Istanbul = wgs84.latlon(41.0082 * N, 28.9784 * E) # 16
+San_Francisco = wgs84.latlon(37.7749 * N, 122.4194 * W) # 17
+Jakarta = wgs84.latlon(6.2088 * S, 106.8456 * E) # 18
+Sofia = wgs84.latlon(42.6977 * N, 23.3219 * E) # 19
+Madrid = wgs84.latlon(40.4168 * N, 3.7038 * W) # 20
+Copenhagen = wgs84.latlon(55.6761 * N, 12.5683 * E) # 21
+Budapest = wgs84.latlon(47.4979 * N, 19.0402 * E) # 22
+Hamburg = wgs84.latlon(53.5511 * N, 9.9937 * E) # 23
+Hanoi = wgs84.latlon(21.0278 * N, 105.8342 * E) # 24
+Sao_Paulo = wgs84.latlon(23.5505 * S, 46.6333 * W) # 25
+Buenos_Aires = wgs84.latlon(34.6037 * S, 58.3816 * W) # 26
+Warsaw = wgs84.latlon(52.2297 * N, 21.0122 * E) # 27
+Bangkok = wgs84.latlon(13.7563 * N, 100.5018 * E) # 28
+Buchararest = wgs84.latlon(44.4268 * N, 26.1025 * E) # 29
+Helsinki = wgs84.latlon(60.1699 * N, 24.9384 * E) # 30
+Mumbai = wgs84.latlon(19.0760 * N, 72.8777 * E) # 31
+Prague = wgs84.latlon(50.0755 * N, 14.4378 * E) # 32
+Brussels = wgs84.latlon(50.8503 * N, 4.3517 * E) # 33
+St_Petersburg = wgs84.latlon(59.9343 * N, 30.3351 * E) # 34
+Dusseldorf = wgs84.latlon(51.2277 * N, 6.7735 * E) # 35
+Washington = wgs84.latlon(38.9072 * N, 77.0369 * W) # 36
+Chennai = wgs84.latlon(13.0827 * N, 80.2707 * E) # 37
+Kuala_Lumpur = wgs84.latlon(3.1390 * N, 101.6869 * E) # 38
+Rio_de_Janeiro = wgs84.latlon(22.9068 * S, 43.1729 * W) # 39
+Oslo = wgs84.latlon(59.9139 * N, 10.7522 * E) # 40
+Mexico_City = wgs84.latlon(19.4326 * N, 99.1332 * W) # 41
+Beijing = wgs84.latlon(39.9042 * N, 116.4074 * E) # 42    
+Zurich = wgs84.latlon(47.3769 * N, 8.5417 * E) # 43
+Sydney = wgs84.latlon(33.8688 * S, 151.2093 * E) # 44
+Santiago = wgs84.latlon(33.4489 * S, 70.6693 * W) # 45
+Toronto = wgs84.latlon(43.6532 * N, 79.3832 * W) # 46
+Bratislava = wgs84.latlon(48.1486 * N, 17.1077 * E) # 47
+Seoul = wgs84.latlon(37.5665 * N, 126.9780 * E) # 48
+Taipei = wgs84.latlon(25.0330 * N, 121.5654 * E) # 49
+Riyadh = wgs84.latlon(24.7136 * N, 46.6753 * E) # 50
+Cape_Town = wgs84.latlon(33.9249 * S, 18.4241 * E) # Extra
+Cairo = wgs84.latlon(30.0444 * N, 31.2357 * E) # Extra
+Nairobi = wgs84.latlon(1.2921 * S, 36.8219 * E) # Extra
+Rio_Gallegos = wgs84.latlon(51.6230 * S, 69.2168 * W) # Extra
+Calgary = wgs84.latlon(51.0486 * N, 114.0708 * W) # Extra
+Ottawa = wgs84.latlon(45.4215 * N, 75.6972 * W) # Extra
+Seattle = wgs84.latlon(47.6062 * N, 122.3321 * W) # Extra
+Krakow = wgs84.latlon(50.0647 * N, 19.9450 * E) # Extra
+Kunahandhoo = wgs84.latlon(1.7843 * N, 73.3692 * E) # Disruption location
+Burgabo = wgs84.latlon(1.2183 * S, 41.8379 * E) # Disruption location
+Bura = wgs84.latlon(3.4501 * S, 39.0836 * E) # Disruption location
+Sumbue = wgs84.latlon(2.8956 * N, 95.8678 * E) # Disruption location
+Pematangsiantar = wgs84.latlon(2.9610 * N, 99.0680 * E) # Disruption location
+North_Atlantic = wgs84.latlon(50 * N, 40.34 * W) # Disruption location
+Pardubice = wgs84.latlon(50.0400 * N, 15.7600 * E) # Disruption location
+Port_Saunders = wgs84.latlon(50.6467 * N, 57.2997 * W) # Disruption location
+Spokane = wgs84.latlon(47.6588 * N, 117.4260 * W) # Disruption location
+Sherbrooke = wgs84.latlon(45.4031 * N, 71.8929 * W) # Disruption location
+Bosherston = wgs84.latlon(51.6217 * N, 4.9117 * W) # Disruption location
+Kisangani = wgs84.latlon(0.5152 * N, 25.1905 * E) # Disruption location
+Nieuwoudtville = wgs84.latlon(31.3833 * S, 19.1000 * E) # Disruption location
+Dashlut = wgs84.latlon(27.5688 * N, 30.7051 * E) # Disruption location
+Puerto_Villamil = wgs84.latlon(0.9333 * S, 90.9500 * W) # Disruption location
+Tres_Lagos = wgs84.latlon(50.3333 * S, 72.2667 * W) # Disruption location
+Shelby = wgs84.latlon(48.5000 * N, 111.8500 * W) # Disruption location
 
 class RoutingSat:
     def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _succeeding_orbit_number, _preceeding_orbit_number, _fore_sat_index, _aft_sat_index):
@@ -170,7 +249,7 @@ class RoutingSat:
                                                                         #  last_neigh_status: (time),     - neigh setting
                                                                         #  neigh_last_down:  (time),  - self setting
                                                                         #  link-congested: (True/False)} - neigh setting
-        self.constellation_link_state_dict = {} # key: satnum, value: (known_neighbors_dict, update_time_increment) // known_neighbors_dict - key: satnum, value: distance
+        self.constellation_link_state_dict = {} # key: satnum, value: (known_neighbors_dict, update_time_increment) // known_neighbors_dict - key: satnum, value: neigh_dict // neigh_dict - key: 'distance', value = distance
         self.constellation_link_state_updates_list = [] # list of constellation_link_state_dict updates received from neighbors
         self.last_neighbor_sats_update = -1 # the time interval of the last neighbor sats update received from this satellite
         self.fore_int_up = True
@@ -188,7 +267,7 @@ class RoutingSat:
         self.link_disruption_ttl = [0, 0, 0, 0, 0, 0] # [fore, aft, port, starboard, fore_port, aft_port, fore_starboard, aft_starboard]
         self.zone_routing_table = {} # key: target_satnum, value: (next_hop_satnum, distance)
 
-    # ::: distributed routing packet structure: {'prev_hop_list': [prev_hop_list], 'distance_traveled': dist, 'dest_gs': dest_gs, 'TTL': packet_TTL, 'dest_satnum': dest_satnum} - packet is at destination when satellite is above dest_gs
+    # ::: distributed routing packet structure: {'prev_hop_list': [prev_hop_list], 'next_hop_list': [next_hop_list], 'distance_traveled': dist, 'dest_gs': dest_gs, 'TTL': packet_TTL, 'dest_satnum': dest_satnum} - packet is at destination when satellite is above dest_gs
     def distributed_routing_link_state_process_packet_queue(self):
         if self.is_disrupted:
             #print(f"::distributed_routing_link_state_process_packet_queue: satellite {self.satnum} is disrupted - not processing packets")
@@ -197,10 +276,10 @@ class RoutingSat:
         if len(self.packet_qu) == 0: # if no packets to send
             return -1
         
-        global num_packets_dropped, num_max_hop_packets_dropped, num_route_calc_failures, num_packets_received, total_distance_traveled, total_hop_count, no_sat_overhead_cnt
+        global num_packets_dropped, num_max_hop_packets_dropped, num_route_calc_failures, num_packets_received, total_distance_traveled, total_hop_count, no_sat_overhead_cnt, draw_static_orbits
         sent_packet = False
         for packet in self.packet_qu:
-            if self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval:  # First, check if satellite exceeded packet bandwidth; notify neighbors of congestion if so
+            if do_qos and self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval:  # First, check if satellite exceeded packet bandwidth; notify neighbors of congestion if so
                 print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet bandwidth exceeded.  Congestion on-demand sent to neighbors")
                 self.publish_state_to_neighbors(congestion = True) # tell neighbors of congestion on-demand (this will be cleared next time interval if packet count is low enough)
                 self.congestion_cnt += 1
@@ -230,8 +309,12 @@ class RoutingSat:
                     total_distance_traveled += distance_traveled
                     total_hop_count += hop_count
                     if draw_static_orbits:
-                        if len(packet['prev_hop_list']) > 30:
-                            draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
+                        draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
+                        response = input("Continue drawing plots? (y/[n]): ")
+                        if response != 'y':
+                            draw_static_orbits = False
+                        #if len(packet['prev_hop_list']) > 30:
+                        #    draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
                     self.packet_qu.remove(packet)
                     sent_packet = True
                     self.packets_sent_cnt += 1
@@ -269,11 +352,17 @@ class RoutingSat:
                 self.packet_qu.remove(packet)
             else: # Fourth, find next hop for packet; add distance of hop to counter; and add to next hop's packet queue
                 #print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Finding next hop.")
-                if len(packet['prev_hop_list']) == 0:
+                if len(packet['prev_hop_list']) == 0: 
                     prev_hop = None
                 else:
                     prev_hop = packet['prev_hop_list'][-1]
-                target_satnum = self.find_next_link_state_hop(packet['dest_gs'], packet['dest_satnum'], prev_hop) # find_next_link_state_hop() is function that performs routing selection
+                if ('next_hop_list' in packet) and (len(packet['next_hop_list']) != 0): # if packet has next hop list, use it
+                    target_satnum = packet['next_hop_list'].pop(0)
+                    if len (packet['next_hop_list']) == 0:
+                        del packet['next_hop_list']
+                    print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet has next hop list.  Using next hop {target_satnum}.")
+                else:
+                    target_satnum = self.find_next_link_state_hop(packet['dest_gs'], packet['dest_satnum'], prev_hop) # find_next_link_state_hop() is function that performs routing selection
                 if target_satnum is None:
                     print(f"::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} - could not find next hop for packet.  Rolling packet to next time increment.")
                     self.rollover_packet_qu.insert(0, packet) # no next hop found; put packet in rollover queue for next time interval
@@ -283,6 +372,11 @@ class RoutingSat:
                     #    draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['dest_gs']], title=routing_name, draw_lines = True, draw_sphere = False)
                     self.packet_qu.remove(packet)
                     continue
+                elif type(target_satnum) is list: # some distributed routing methods may provide a list of next hops
+                    next_hop_list = target_satnum
+                    target_satnum = next_hop_list.pop(0)
+                    packet['next_hop_list'] = next_hop_list
+                    print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: find_next_link_state_hop returned list.  Using next hop {target_satnum} and attaching list: {next_hop_list}")
                 #print(f"::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} setting next hop to satnum: {target_satnum}")
                 packet['prev_hop_list'].append(self.sat.model.satnum)
                 target_distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, target_satnum)
@@ -675,14 +769,18 @@ class RoutingSat:
         zone_routing_table_satnums = intra_zone_node_list + boundary_node_list
         # if destination is in the same zone, return next hop from zone routing table
         if dest_satnum in zone_routing_table_satnums:
+            #print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} in zone routing table")
             return self.motif_method_get_next_hop_from_zone_routing_table(dest_satnum)
         # Otherwise:
         # If destination is not in the same zone, identify which boundary node is closest to the destination satellite
         min_hop_boundary_satnum = self.motif_method_get_min_hop_boundary_satnum(dest_satnum, boundary_node_list)
+        #print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum}")
         if min_hop_boundary_satnum is None: # error in calculating min hop boundary satnum
             return None
         # Identify next hop for target_satnum from zone_routing_table
         return self.motif_method_get_next_hop_from_zone_routing_table(min_hop_boundary_satnum)
+        #print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum} - next hop is {next_hop}")
+        #return next_hop
         
         
         
@@ -859,7 +957,7 @@ class RoutingSat:
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum:
-                print(f"Priority 1 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                #print(f"Priority 1 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
         #print(f"Priority 1 direction: {priority_direction} NOT AVAILABLE")
 
@@ -868,7 +966,7 @@ class RoutingSat:
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum:
-                print(f"Priority 2 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                #print(f"Priority 2 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
         #print(f"Priority 2 direction: {priority_direction} NOT AVAILABLE")
         
@@ -877,7 +975,7 @@ class RoutingSat:
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum:
-                print(f"Priority 3 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                print(f"\t::link_state_routing_method_triCoord:: Priority 3 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
         #print(f"Priority 3 direction: {priority_direction} NOT AVAILABLE")
 
@@ -886,7 +984,7 @@ class RoutingSat:
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum:
-                print(f"Priority 4 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                print(f"\t::link_state_routing_method_triCoord:: Priority 4 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
         #print(f"Priority 4 direction: {priority_direction} NOT AVAILABLE")
 
@@ -895,7 +993,7 @@ class RoutingSat:
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum:
-                print(f"Priority 5 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                print(f"\t::link_state_routing_method_triCoord:: Priority 5 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
         #print(f"Priority 5 direction: {priority_direction} NOT AVAILABLE")
 
@@ -1378,22 +1476,22 @@ class RoutingSat:
         global cur_time_increment
         next_hop_satnum = None
 
-        print(f"::link_state_routing_method_dijkstar_dist:: Building graph for satnum: {self.sat.model.satnum}, time increment {cur_time_increment}")
+        print(f"::link_state_routing_method_dijkstar:: Building graph for satnum: {self.sat.model.satnum}, time increment {cur_time_increment}")
         graph = Graph()
         for target_satnum in self.constellation_link_state_dict.keys():
             known_neighbors_dict, _ = self.constellation_link_state_dict[target_satnum]
             for neigh_satnum in known_neighbors_dict.keys():
                 if use_dist:
-                    graph.add_edge(target_satnum, neigh_satnum, known_neighbors_dict[neigh_satnum])
+                    graph.add_edge(target_satnum, neigh_satnum, known_neighbors_dict[neigh_satnum]['distance'])
                 else:
                     graph.add_edge(target_satnum, neigh_satnum, 1)
-        print(f"::link_state_routing_method_dijkstar_dist:: Graph built, finding path to {dest_satnum}")
+        print(f"::link_state_routing_method_dijkstar:: Graph built for sat {self.sat.model.satnum}, finding path to {dest_satnum}")
         try:
             path = find_path(graph, self.sat.model.satnum, dest_satnum)
-            print(f"::link_state_routing_method_dijkstar_dist:: Path found, path: {path}")
+            print(f"::link_state_routing_method_dijkstar:: Path found, path: {path}")
             next_hop_satnum = path.nodes[1]
         except Exception as e:
-            print(f"::link_state_routing_method_dijkstar_dist:: Path not found, exception: {e}")
+            print(f"::link_state_routing_method_dijkstar:: Path not found, exception: {e}")
         
         return next_hop_satnum
     
@@ -1410,29 +1508,38 @@ class RoutingSat:
         self.zone_routing_table.clear()
         temp_zone_routing_table = {} # this dictionary is used to identify neighbor's neighbors that are accessible by two paths (this is what we want stored in the zone routing table)
 
-        # calculate distance to each neighbor and update zone routing table
         # create dictionary to store the neighbor dictionaries of neighbors
+        
+        # calculate distance to each neighbor and update zone routing table
         neigh_neigh_dict_dict = {}
         for neigh_satnum in neigh_satnum_list:
             dist, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, neigh_satnum)
+            dist = float(dist) # convert to float
+            #print(f"::motif_method_update_zone_routing_table:: neigh distance type: {type(dist)}")
             # create a direct entry containing only distance value for direct neighbors
             self.zone_routing_table[neigh_satnum] = dist
             # get the neighbors for each neighbor, calculate distance, update zone routing table
             neigh_sat_object = sat_object_list[neigh_satnum]
             neigh_neigh_satnum_list = neigh_sat_object.get_list_of_cur_neighbor_satnums()
+            if self.sat.model.satnum in neigh_neigh_satnum_list:
+                neigh_neigh_satnum_list.remove(self.sat.model.satnum) # remove self from list (don't want to add self to zone routing table)
             # create dictionary to store the neighbors of this neighbor
             neigh_neigh_dict = {}
             # for each of this neighbor's neighbors, calculate distance and store in neigh_neigh dictionary (key: neigh_neigh_satnum, value: distance)
             for neigh_neigh_satnum in neigh_neigh_satnum_list:
                 dist, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, neigh_neigh_satnum)
+                dist = float(dist) # convert to float
+                #print(f"::motif_method_update_zone_routing_table:: neigh_neigh distance type: {type(dist)}")
                 neigh_neigh_dict[neigh_neigh_satnum] = dist
             # once done building dictionary of this neighbor's neighbors, add to neigh_neigh_dict_dict (key: neigh_satnum, value: neigh_neigh_dict)
             neigh_neigh_dict_dict[neigh_satnum] = neigh_neigh_dict
         # Once finished finding all of our neighbor's neighbors and storing their distances,
         # we need to find the neighbors of neighbors that are accessible by two paths
         for neigh_satnum in neigh_neigh_dict_dict.keys():
-            neigh_neigh_dict = neigh_neigh_dict_dict[neigh_satnum]
+            neigh_neigh_dict = neigh_neigh_dict_dict[neigh_satnum] # neigh_neigh_dict is a dictionary of all the neighbors (and distances) of neigh_satnum
             for neigh_neigh_satnum in neigh_neigh_dict.keys():
+                if neigh_neigh_satnum in neigh_satnum_list: # if the neighbor's neighbor is a direct neighbor, skip it
+                    continue
                 if not neigh_neigh_satnum in temp_zone_routing_table.keys(): # haven't seen this satellite yet
                     neigh_dist = self.zone_routing_table[neigh_satnum] # get the distance to direct neighbor that was already calculated
                     neigh_neigh_dist = neigh_neigh_dict[neigh_neigh_satnum] # get the distance from the neighbor's neighbor to the direct neighbor
@@ -1443,12 +1550,17 @@ class RoutingSat:
                     neigh_neigh_dist = neigh_neigh_dict[neigh_neigh_satnum]
                     path1_dist = neigh_dist + neigh_neigh_dist # save the distance of path1
                     (path2_satnum, path2_dist) = temp_zone_routing_table[neigh_neigh_satnum] # retrieve the previously seen path and label as path2 and save its distance
-                    if (not (type(path1_dist) is int or type(path1_dist) is float)or not (type(path2_dist) is int or type(path2_dist) is float)):
-                        print(f"::motif_method_update_zone_routing_table:: ERROR: path1_dist or path2_dist is not a number, path1_dist: {path1_dist}, path2_dist: {path2_dist}")
+                    
                     if path1_dist < path2_dist:
                         self.zone_routing_table[neigh_neigh_satnum] = (path1_satnum, path2_satnum) # save the neighbor's neighbor satnum in the dictionary with a tuple of the two paths, the shortest path being the first entry
                     else:
                         self.zone_routing_table[neigh_neigh_satnum] = (path2_satnum, path1_satnum)
+        # Now add all the boundary nodes (reachable by two hops, but doesn't have two paths)
+        for neigh_satnum in neigh_neigh_dict_dict.keys():
+            neigh_neigh_dict = neigh_neigh_dict_dict[neigh_satnum]
+            for neigh_neigh_satnum in neigh_neigh_dict.keys():
+                if neigh_neigh_satnum not in self.zone_routing_table:
+                    self.zone_routing_table[neigh_neigh_satnum] = (neigh_satnum, None) # use None as path2 to signify boundary node
 
 
 
@@ -1461,12 +1573,17 @@ class RoutingSat:
         intra_zone_satnum_list = []
         for zrt_satnum_entry in self.zone_routing_table.keys():
             zrt_result = self.zone_routing_table[zrt_satnum_entry]
-            if type(zrt_result) is tuple:
+            if type(zrt_result) is not tuple:
+                # this is a intra-zone node (direct neighbor)
+                intra_zone_satnum_list.append(zrt_satnum_entry)
+            elif zrt_result[1] is None:
                 # this is a boundary node
                 boundary_satnum_list.append(zrt_satnum_entry)
             else:
-                # this is an intra-zone node
+                # this is a intra-zone node (indirect neighbor)
                 intra_zone_satnum_list.append(zrt_satnum_entry)
+        if len(boundary_satnum_list) == 0:
+            print(f"::motif_method_get_intra_zone_nodes:: ERROR: Sat {self.sat.model.satnum} boundary_satnum_list is empty. ZRT: {self.zone_routing_table}")
         return intra_zone_satnum_list, boundary_satnum_list
         """
         neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
@@ -1486,6 +1603,7 @@ class RoutingSat:
         """
 
     def motif_method_get_min_hop_boundary_satnum(self, target_satnum, boundary_node_list):
+        #print(f"::motif_method_get_min_hop_boundary_satnum:: Sat: {self.sat.model.satnum}; target_satnum: {target_satnum}; boundary_node_list: {boundary_node_list}")
         target_routing_sat = sat_object_list[target_satnum]
         min_hop_boundary_satnum = -1
         min_hop_count = 1000000
@@ -1495,33 +1613,42 @@ class RoutingSat:
             intra_orbit_partial_hop_count = (target_routing_sat.sat_index - boundary_routing_sat.sat_index) % sats_per_orbit
             intra_orbit_hop_count = min(intra_orbit_partial_hop_count, orbit_cnt - intra_orbit_partial_hop_count)
             boundary_sat_hop_count = inter_orbit_hop_count + intra_orbit_hop_count
+            #print(f"\t::motif_method_get_min_hop_boundary_satnum:: boundary_satnum: {boundary_satnum}; inter_orbit_hop_count: {inter_orbit_hop_count}; intra_orbit_hop_count: {intra_orbit_hop_count}; boundary_sat_hop_count: {boundary_sat_hop_count}")
             if boundary_sat_hop_count < min_hop_count:
                 min_hop_count = boundary_sat_hop_count
                 min_hop_boundary_satnum = boundary_satnum
         if min_hop_boundary_satnum == -1:
-            print(f"::motif_method_get_min_hop_boundary_satnum:: ERROR: min_hop_boundary_satnum is -1")
+            print(f"::motif_method_get_min_hop_boundary_satnum:: Sat {self.sat.model.satnum} ERROR: Count not find min hop boundary satellite for target satnum {target_satnum}; using boundary node list: {boundary_node_list}")
             return None
+        #print(f"\t::motif_method_get_min_hop_boundary_satnum:: selected min_hop_boundary_satnum: {min_hop_boundary_satnum}")
         return min_hop_boundary_satnum
     
     def motif_method_get_next_hop_from_zone_routing_table(self, target_satnum):        
         if not target_satnum in self.zone_routing_table.keys():
-            print(f"::motif_method_get_next_hop_from_zone_routing_table:: ERROR: target_satnum {target_satnum} not in zone_routing_table.  Sat {self.sat.model.satnum} -> ZRT entries: {self.zone_routing_table.keys()}")
+            print(f"\t::motif_method_get_next_hop_from_zone_routing_table:: ERROR: target_satnum {target_satnum} not in zone_routing_table.  Sat {self.sat.model.satnum} -> ZRT entries: {self.zone_routing_table.keys()}")
             return None
         next_hop_result = self.zone_routing_table[target_satnum]
         neigh_satnum_list = self.get_list_of_cur_neighbor_satnums() # verify the sat identified in the zone routing table is still an available neighbor (prob unnecessary)
         if type(next_hop_result) is tuple: # target satnum was a neighbor's neighbor, find the neighbor that is still available
             next_hop_pri_satnum, next_hop_alt_satnum = next_hop_result
             if next_hop_pri_satnum in neigh_satnum_list: 
-                return next_hop_pri_satnum # primary neighbor is available, so use this path
+                #print(f"\t::motif_method_get_next_hop_from_zone_routing_table:: Satellite {self.satnum} is routing to {target_satnum} via {next_hop_pri_satnum} (primary path) [as list]")
+                #return next_hop_pri_satnum # primary neighbor is available, so use this path
+                return [next_hop_pri_satnum, target_satnum] # primary neighbor is available, so provide list of next hop and target satnums
             elif next_hop_alt_satnum in neigh_satnum_list:
-                return next_hop_alt_satnum # alternate neighbor is available, so use this path
+                #print(f"\t::motif_method_get_next_hop_from_zone_routing_table:: Satellite {self.satnum} is routing to {target_satnum} via {next_hop_pri_satnum} (alternate path) [as list]")
+                #return next_hop_alt_satnum # alternate neighbor is available, so use this path
+                return [next_hop_alt_satnum, target_satnum] # alternate neighbor is available, so provide list of next hop and target satnums
             else:
+                #print(f"\t::motif_method_get_next_hop_from_zone_routing_table:: ERROR: Satellite {self.satnum} is routing to {target_satnum} via {next_hop_pri_satnum} (primary path) and {next_hop_alt_satnum} (alternate path), but neither is available")
                 return None # neither neighbor is available, so return None
         else:
-            next_hop_satnum = next_hop_result # target satnum was a direct neighor, so we got it's satnum
+            next_hop_satnum = target_satnum # target satnum was a direct neighor, so we got it's satnum
             if next_hop_satnum in neigh_satnum_list:
+                #print(f"\t::motif_method_get_next_hop_from_zone_routing_table:: Satellite {self.satnum} is routing to {target_satnum} via {next_hop_satnum} (direct neighbor)")
                 return next_hop_satnum # target satnum is available, so return it
             else:
+                #print(f"\t::motif_method_get_next_hop_from_zone_routing_table:: ERROR: Satellite {self.satnum} is routing to {target_satnum} via {next_hop_satnum} (direct neighbor), but it is not available")
                 return None # target satnum is not available, so return None
 
 # End Routing sat class
@@ -1804,6 +1931,8 @@ def get_sat_distance_and_rate_by_satnum(sat1_satnum, sat2_satnum): # returns dis
 def apply_disruption_schedule():
     global cur_time_increment, disruption_schedule, num_disrupted_packets_dropped
 
+    interface_names = six_interface_names # will need to change this if using differnent number of interfaces
+
     if cur_time_increment not in disruption_schedule: # if no disruptions for this time increment, return
         print(f"::apply_disruption_schedule:: No new disruptions for time increment {cur_time_increment}")
         disruption_list = None
@@ -1829,16 +1958,35 @@ def apply_disruption_schedule():
     # add new disruptions to appropriate disruption list
     if disruption_list is not None:
         for disruption in disruption_list:
-            dis_type, target, TTL = disruption
-            if dis_type == 'reg':
+            if disruption[0] == 'reg':
+                _, target, TTL = disruption
                 disrupted_regions_dict[target] = TTL
-            elif dis_type == 'sat':
+            elif disruption[0] == 'sat':
+                _, target, TTL = disruption
                 cur_sat_disruption_dict[target] = TTL
-            elif 'link' in dis_type:
+            elif 'link' in disruption[0]:
+                dis_type, target, TTL = disruption
                 if target not in cur_link_disruption_dict:
                     cur_link_disruption_dict[target] = [(int(dis_type[-1]), TTL)] # link disruptions are stored as a tuple of (link number, TTL); link number is last character of dis_type
                 else:
                     cur_link_disruption_dict[target].append((int(dis_type[-1]), TTL))
+            elif disruption[0] == 'type_I':
+                _, disruption_location, disruption_intensity, disruption_coverage, disruption_duration = disruption
+                disrupted_r_sat_list = []
+                for r_sat in sat_object_list: # find the satellites impacted by the disruption
+                    topo_pos = (r_sat.sat - disruption_location).at(cur_time)
+                    elev, _, _ = topo_pos.altaz()
+                    if elev.degrees > disruption_coverage:
+                        disrupted_r_sat_list.append(r_sat)
+                for r_sat in disrupted_r_sat_list: # for each impacted satellite, disrupt a number of links
+                    num_links = len(interface_names)
+                    num_selected = int(num_links * disruption_intensity)
+                    disrupted_links = random.sample(list(range(num_links)), num_selected)
+                    for link in disrupted_links:
+                        if r_sat.sat.model.satnum not in cur_link_disruption_dict:
+                            cur_link_disruption_dict[r_sat.sat.model.satnum] = [(link, disruption_duration)]
+                        else:
+                            cur_link_disruption_dict[r_sat.sat.model.satnum].append((link, disruption_duration))
 
     # loop through all satellites and apply disruptions as appropriate
     for r_sat in sat_object_list:
@@ -1849,7 +1997,7 @@ def apply_disruption_schedule():
                 r_sat.is_disrupted = False
                 removed_disruptions += 1
         for link in range(6): # check for link disruptions [0: fore, 1: aft, 2: fore_port, 3: aft_port, 4: fore_starboard, 5: aft_starboard]
-            link_ttl = r_sat.link_disruption_ttl[link]
+            link_ttl = r_sat.link_disruption_ttl[link] # all link disruptions on a satellite share the same TTL
             if link_ttl > 0:
                 r_sat.link_disruption_ttl[link] -= 1
                 if link_ttl <= 0:
@@ -2022,11 +2170,16 @@ def draw_static_plot(satnum_list, terminal_list = [], title='figure', draw_lines
         ax.plot(x_array, y_array, z_array, color = 'black', zorder = 5)
     
     plt.show()
-    global plot_dropped_packets
+    global plot_dropped_packets, draw_static_orbits
     if plot_dropped_packets:
         response = input("Continue to plot dropped packets? ([y]/n): ") or 'y'
         if response != 'y':
             plot_dropped_packets = False
+    if draw_static_orbits:
+        response = input("Continue drawing plots? (y/[n]): ")
+        if response != 'y':
+            draw_static_orbits = False
+    
 
 
 
@@ -3017,7 +3170,7 @@ def distributed_link_state_routing():
             del packet_schedule[cur_time_increment]
         
         # 2. Update all neighbor states for current time interval        
-        print("Updating neighbor states")
+        print("\n<Updating neighbor states>")
         start = time.process_time()
         all_sats_update_neigh_state()  # each satellite publishes it's state to it's neighbors and then the satellites process the received data
         compute_time = time.process_time() - start
@@ -3131,6 +3284,41 @@ def build_disruption_schedule_static():
                 num_link_disruptions += 1            
         continue
 
+def build_type_x_disruption_schedule():
+    global disruption_schedule_method, disruption_options_string
+    disruption_options = disruption_options_string.split(',')
+    if disruption_schedule_method == 'type_I':
+        if len(disruption_options) != 5:
+            print(f'Error: Invalid disruption options for type_I disruption schedule.\n\tMust specify: startingInterval,disruptionLocationName,disruptionIntensity,disruptionCoverage,disruptionDuration.\n\tReceived: {disruption_options_string}')
+            exit()
+        starting_interval, disruption_location_name, disruption_intensity, disruption_coverage, disruption_duration = disruption_options
+        starting_interval = int(starting_interval)
+        disruption_intensity = int(disruption_intensity)
+        if disruption_intensity < 0 or disruption_intensity > 100:
+            print(f'Error: Invalid disruption intensity for type_I disruption schedule.\n\tMust be between 0 and 100.\n\tReceived: {disruption_intensity}')
+            exit()
+        disruption_intensity = float(disruption_intensity/100)
+        disruption_coverage = int(disruption_coverage)
+        disruption_duration = int(disruption_duration)
+        location_found = False
+        for global_var in globals():
+            if global_var == disruption_location_name:
+                disruption_location = globals()[global_var]
+                location_found = True
+                break
+        if not location_found:
+            print(f'Error: Invalid disruption location for type_I disruption schedule.\n\tMust be a valid location defined in the locations file.\n\tReceived: {disruption_location_name}')
+            exit()
+        build_type_I_disruption_schedule(starting_interval, disruption_location, disruption_intensity, disruption_coverage, disruption_duration)
+
+# Generates disruptions originating from disruption_location
+# disruption_intensity is percent value ranging from 0 - 100 (impacts the number of links of disrupted for impacted satellites)
+# disruption_coverage is disruption field of view angle in degrees
+def build_type_I_disruption_schedule(starting_interval, disruption_location, disruption_intensity, disruption_coverage, disruption_duration):
+    global disruption_schedule
+    disruption_schedule[starting_interval] = [['type_I', disruption_location, disruption_intensity, disruption_coverage, disruption_duration]]
+
+
 # generates disruptions based on percentage of links or satellites disruptioned
 # default is 30% of links disrupted for 1 time interval, occuring once
 # disruption_type: 'link' or sat'
@@ -3147,7 +3335,7 @@ def build_disruption_schedule_percent(disruption_type = 'link', percent = 0.3, d
     global disruption_schedule, disruption_options_string
 
     if not disruption_options_string == "": # will use default values if disruption_option_string is empty
-        disruption_options = disruption_options_string.split('_')
+        disruption_options = disruption_options_string.split(',')
         if len(disruption_options) != 4:
             print(f"ERROR: Invalid disruption option string: {disruption_options_string}")
             exit()
@@ -3311,6 +3499,14 @@ def dump_packet_schedule_to_file():
             build_packet_schedule()
         elif packet_schedule_method == 'alt_random':
             alt_build_packet_schedule()
+        elif packet_schedule_method == 'EW_equator':
+            build_EW_equator_packet_schedule()
+        elif packet_schedule_method == 'EW_high_latitude':
+            build_EW_high_latitude_packet_schedule()
+        elif packet_schedule_method == 'NS_old_world':
+            build_NS_old_world_equator_packet_schedule()
+        elif packet_schedule_method == 'NS_new_world':
+            build_NS_new_world_equator_packet_schedule()
         else:
             print(f"Unkown packet schedule method specified: {packet_schedule_method}")
             exit()
@@ -3359,62 +3555,43 @@ def load_disruption_schedule_from_file():
         print(f"Loaded the following schedule configuration:\n{schedule_details_dict}")
         #print(f"disruption_schedule: {disruption_schedule}")
 
+def build_EW_equator_packet_schedule():
+    # Using Kuala Lumpur and Nairobi
+    city_list = [Kuala_Lumpur, Nairobi]
+    build_2_city_packet_schedule(city_list)
+
+def build_EW_high_latitude_packet_schedule():
+    # Using Ottawa and London
+    #city_list = [Ottawa, London]
+    # Using Seattle and Krakow
+    city_list = [Seattle, Krakow]
+    build_2_city_packet_schedule(city_list)
+
+def build_NS_old_world_equator_packet_schedule():
+    # Using Cape Town and Cairo
+    city_list = [Cape_Town, Cairo]
+    build_2_city_packet_schedule(city_list)
+
+def build_NS_new_world_equator_packet_schedule():
+    # Using Rio Gallegos and Calgary
+    city_list = [Rio_Gallegos, Calgary]
+    build_2_city_packet_schedule(city_list)
+
+def build_2_city_packet_schedule (city_list):
+    global num_time_intervals, packets_generated_per_interval, packet_schedule
+
+    for interval in range(num_time_intervals):
+        for packet_cnt in range(packets_generated_per_interval):
+            if packet_cnt == 0:
+                packet_schedule[interval] = []
+            if packet_cnt % 2 == 0:
+                packet_schedule[interval].append((city_list[0], city_list[1]))
+            else:
+                packet_schedule[interval].append((city_list[1], city_list[0]))
+
 
 # generate the list packet_schedule that contains a list of packets to be sent at each time interval
 def build_packet_schedule():
-    # establish city bandwidth utilization and common routes - using: https://global-internet-map-2021.telegeography.com/
-    # Ranked by internation bandwidth capacity
-    Frankfurt = wgs84.latlon(50.1109 * N, 8.6821 * E) # 1
-    London = wgs84.latlon(51.5072 * N, 0.1276 * W) # 2
-    Amsterdam = wgs84.latlon(52.3667 * N, 4.8945 * E) # 3
-    Paris = wgs84.latlon(48.8567 * N, 2.3508 * E) # 4
-    Singapore = wgs84.latlon(1.3521 * N, 103.8198 * E) # 5
-    Hong_Kong = wgs84.latlon(22.3193 * N, 114.1694 * E) # 6
-    Stockholm = wgs84.latlon(59.3293 * N, 18.0686 * E) # 7
-    Miami = wgs84.latlon(25.7617 * N, 80.1918 * W) # 8
-    Marseille = wgs84.latlon(43.2964 * N, 5.3700 * E) # 9
-    Los_Angeles = wgs84.latlon(34.0522 * N, 118.2437 * W) # 10
-    New_York = wgs84.latlon(40.7128 * N, 74.0060 * W) # 11
-    Vienna = wgs84.latlon(48.2082 * N, 16.3738 * E) # 12
-    Moscow = wgs84.latlon(55.7558 * N, 37.6173 * E) # 13
-    Milan = wgs84.latlon(45.4642 * N, 9.1900 * E) # 14
-    Tokyo = wgs84.latlon(35.6762 * N, 139.6503 * E) # 15
-    Istanbul = wgs84.latlon(41.0082 * N, 28.9784 * E) # 16
-    San_Francisco = wgs84.latlon(37.7749 * N, 122.4194 * W) # 17
-    Jakarta = wgs84.latlon(6.2088 * S, 106.8456 * E) # 18
-    Sofia = wgs84.latlon(42.6977 * N, 23.3219 * E) # 19
-    Madrid = wgs84.latlon(40.4168 * N, 3.7038 * W) # 20
-    Copenhagen = wgs84.latlon(55.6761 * N, 12.5683 * E) # 21
-    Budapest = wgs84.latlon(47.4979 * N, 19.0402 * E) # 22
-    Hamburg = wgs84.latlon(53.5511 * N, 9.9937 * E) # 23
-    Hanoi = wgs84.latlon(21.0278 * N, 105.8342 * E) # 24
-    Sao_Paulo = wgs84.latlon(23.5505 * S, 46.6333 * W) # 25
-    Buenos_Aires = wgs84.latlon(34.6037 * S, 58.3816 * W) # 26
-    Warsaw = wgs84.latlon(52.2297 * N, 21.0122 * E) # 27
-    Bangkok = wgs84.latlon(13.7563 * N, 100.5018 * E) # 28
-    Buchararest = wgs84.latlon(44.4268 * N, 26.1025 * E) # 29
-    Helsinki = wgs84.latlon(60.1699 * N, 24.9384 * E) # 30
-    Mumbai = wgs84.latlon(19.0760 * N, 72.8777 * E) # 31
-    Prague = wgs84.latlon(50.0755 * N, 14.4378 * E) # 32
-    Brussels = wgs84.latlon(50.8503 * N, 4.3517 * E) # 33
-    St_Petersburg = wgs84.latlon(59.9343 * N, 30.3351 * E) # 34
-    Dusseldorf = wgs84.latlon(51.2277 * N, 6.7735 * E) # 35
-    Washington = wgs84.latlon(38.9072 * N, 77.0369 * W) # 36
-    Chennai = wgs84.latlon(13.0827 * N, 80.2707 * E) # 37
-    Kuala_Lumpur = wgs84.latlon(3.1390 * N, 101.6869 * E) # 38
-    Rio_de_Janeiro = wgs84.latlon(22.9068 * S, 43.1729 * W) # 39
-    Oslo = wgs84.latlon(59.9139 * N, 10.7522 * E) # 40
-    Mexico_City = wgs84.latlon(19.4326 * N, 99.1332 * W) # 41
-    Beijing = wgs84.latlon(39.9042 * N, 116.4074 * E) # 42    
-    Zurich = wgs84.latlon(47.3769 * N, 8.5417 * E) # 43
-    Sydney = wgs84.latlon(33.8688 * S, 151.2093 * E) # 44
-    Santiago = wgs84.latlon(33.4489 * S, 70.6693 * W) # 45
-    Toronto = wgs84.latlon(43.6532 * N, 79.3832 * W) # 46
-    Bratislava = wgs84.latlon(48.1486 * N, 17.1077 * E) # 47
-    Seoul = wgs84.latlon(37.5665 * N, 126.9780 * E) # 48
-    Taipei = wgs84.latlon(25.0330 * N, 121.5654 * E) # 49
-    Riyadh = wgs84.latlon(24.7136 * N, 46.6753 * E) # 50
-
     city_list = [Frankfurt, Paris, Amsterdam, London, Singapore, Jakarta, Marseille, Mumbai, Tokyo, Hong_Kong, Los_Angeles, Hanoi, Miami, Sao_Paulo, Madrid, Washington, Rio_de_Janeiro, Milan, Vienna, Moscow, Istanbul, San_Francisco, Sofia, Copenhagen, Budapest, Hamburg, Buenos_Aires, Warsaw, Bangkok, Buchararest, Helsinki, Prague, Brussels, St_Petersburg, Dusseldorf, Chennai, Kuala_Lumpur, Oslo, Mexico_City, Beijing, Zurich, Sydney, Santiago, Toronto, Bratislava, Seoul, Taipei, Riyadh]
 
     # Also need to create a range of random locations on the globe (to include oceans)
@@ -3507,59 +3684,6 @@ def build_packet_schedule():
 
 # generate the list packet_schedule that contains a list of packets to be sent at each time interval
 def alt_build_packet_schedule():
-    # establish city bandwidth utilization and common routes - using: https://global-internet-map-2021.telegeography.com/
-    # Ranked by internation bandwidth capacity
-    Frankfurt = wgs84.latlon(50.1109 * N, 8.6821 * E) # 1
-    London = wgs84.latlon(51.5072 * N, 0.1276 * W) # 2
-    Amsterdam = wgs84.latlon(52.3667 * N, 4.8945 * E) # 3
-    Paris = wgs84.latlon(48.8567 * N, 2.3508 * E) # 4
-    Singapore = wgs84.latlon(1.3521 * N, 103.8198 * E) # 5
-    Hong_Kong = wgs84.latlon(22.3193 * N, 114.1694 * E) # 6
-    Stockholm = wgs84.latlon(59.3293 * N, 18.0686 * E) # 7
-    Miami = wgs84.latlon(25.7617 * N, 80.1918 * W) # 8
-    Marseille = wgs84.latlon(43.2964 * N, 5.3700 * E) # 9
-    Los_Angeles = wgs84.latlon(34.0522 * N, 118.2437 * W) # 10
-    New_York = wgs84.latlon(40.7128 * N, 74.0060 * W) # 11
-    Vienna = wgs84.latlon(48.2082 * N, 16.3738 * E) # 12
-    Moscow = wgs84.latlon(55.7558 * N, 37.6173 * E) # 13
-    Milan = wgs84.latlon(45.4642 * N, 9.1900 * E) # 14
-    Tokyo = wgs84.latlon(35.6762 * N, 139.6503 * E) # 15
-    Istanbul = wgs84.latlon(41.0082 * N, 28.9784 * E) # 16
-    San_Francisco = wgs84.latlon(37.7749 * N, 122.4194 * W) # 17
-    Jakarta = wgs84.latlon(6.2088 * S, 106.8456 * E) # 18
-    Sofia = wgs84.latlon(42.6977 * N, 23.3219 * E) # 19
-    Madrid = wgs84.latlon(40.4168 * N, 3.7038 * W) # 20
-    Copenhagen = wgs84.latlon(55.6761 * N, 12.5683 * E) # 21
-    Budapest = wgs84.latlon(47.4979 * N, 19.0402 * E) # 22
-    Hamburg = wgs84.latlon(53.5511 * N, 9.9937 * E) # 23
-    Hanoi = wgs84.latlon(21.0278 * N, 105.8342 * E) # 24
-    Sao_Paulo = wgs84.latlon(23.5505 * S, 46.6333 * W) # 25
-    Buenos_Aires = wgs84.latlon(34.6037 * S, 58.3816 * W) # 26
-    Warsaw = wgs84.latlon(52.2297 * N, 21.0122 * E) # 27
-    Bangkok = wgs84.latlon(13.7563 * N, 100.5018 * E) # 28
-    Buchararest = wgs84.latlon(44.4268 * N, 26.1025 * E) # 29
-    Helsinki = wgs84.latlon(60.1699 * N, 24.9384 * E) # 30
-    Mumbai = wgs84.latlon(19.0760 * N, 72.8777 * E) # 31
-    Prague = wgs84.latlon(50.0755 * N, 14.4378 * E) # 32
-    Brussels = wgs84.latlon(50.8503 * N, 4.3517 * E) # 33
-    St_Petersburg = wgs84.latlon(59.9343 * N, 30.3351 * E) # 34
-    Dusseldorf = wgs84.latlon(51.2277 * N, 6.7735 * E) # 35
-    Washington = wgs84.latlon(38.9072 * N, 77.0369 * W) # 36
-    Chennai = wgs84.latlon(13.0827 * N, 80.2707 * E) # 37
-    Kuala_Lumpur = wgs84.latlon(3.1390 * N, 101.6869 * E) # 38
-    Rio_de_Janeiro = wgs84.latlon(22.9068 * S, 43.1729 * W) # 39
-    Oslo = wgs84.latlon(59.9139 * N, 10.7522 * E) # 40
-    Mexico_City = wgs84.latlon(19.4326 * N, 99.1332 * W) # 41
-    Beijing = wgs84.latlon(39.9042 * N, 116.4074 * E) # 42    
-    Zurich = wgs84.latlon(47.3769 * N, 8.5417 * E) # 43
-    Sydney = wgs84.latlon(33.8688 * S, 151.2093 * E) # 44
-    Santiago = wgs84.latlon(33.4489 * S, 70.6693 * W) # 45
-    Toronto = wgs84.latlon(43.6532 * N, 79.3832 * W) # 46
-    Bratislava = wgs84.latlon(48.1486 * N, 17.1077 * E) # 47
-    Seoul = wgs84.latlon(37.5665 * N, 126.9780 * E) # 48
-    Taipei = wgs84.latlon(25.0330 * N, 121.5654 * E) # 49
-    Riyadh = wgs84.latlon(24.7136 * N, 46.6753 * E) # 50
-
     city_list = [Frankfurt, Paris, Amsterdam, London, Singapore, Jakarta, Marseille, Mumbai, Tokyo, Hong_Kong, Los_Angeles, Hanoi, Miami, Sao_Paulo, Madrid, Washington, Rio_de_Janeiro, Milan, Vienna, Moscow, Istanbul, San_Francisco, Sofia, Copenhagen, Budapest, Hamburg, Buenos_Aires, Warsaw, Bangkok, Buchararest, Helsinki, Prague, Brussels, St_Petersburg, Dusseldorf, Chennai, Kuala_Lumpur, Oslo, Mexico_City, Beijing, Zurich, Sydney, Santiago, Toronto, Bratislava, Seoul, Taipei, Riyadh]
 
     # Also need to create a range of random locations on the globe (to include oceans)
@@ -3615,59 +3739,6 @@ def alt_build_packet_schedule():
                 packet_schedule[interval].append((random_location1, random_location2))
 
 def static_build_packet_schedule():
-    # establish city bandwidth utilization and common routes - using: https://global-internet-map-2021.telegeography.com/
-    # Ranked by internation bandwidth capacity
-    Frankfurt = wgs84.latlon(50.1109 * N, 8.6821 * E) # 1
-    London = wgs84.latlon(51.5072 * N, 0.1276 * W) # 2
-    Amsterdam = wgs84.latlon(52.3667 * N, 4.8945 * E) # 3
-    Paris = wgs84.latlon(48.8567 * N, 2.3508 * E) # 4
-    Singapore = wgs84.latlon(1.3521 * N, 103.8198 * E) # 5
-    Hong_Kong = wgs84.latlon(22.3193 * N, 114.1694 * E) # 6
-    Stockholm = wgs84.latlon(59.3293 * N, 18.0686 * E) # 7
-    Miami = wgs84.latlon(25.7617 * N, 80.1918 * W) # 8
-    Marseille = wgs84.latlon(43.2964 * N, 5.3700 * E) # 9
-    Los_Angeles = wgs84.latlon(34.0522 * N, 118.2437 * W) # 10
-    New_York = wgs84.latlon(40.7128 * N, 74.0060 * W) # 11
-    Vienna = wgs84.latlon(48.2082 * N, 16.3738 * E) # 12
-    Moscow = wgs84.latlon(55.7558 * N, 37.6173 * E) # 13
-    Milan = wgs84.latlon(45.4642 * N, 9.1900 * E) # 14
-    Tokyo = wgs84.latlon(35.6762 * N, 139.6503 * E) # 15
-    Istanbul = wgs84.latlon(41.0082 * N, 28.9784 * E) # 16
-    San_Francisco = wgs84.latlon(37.7749 * N, 122.4194 * W) # 17
-    Jakarta = wgs84.latlon(6.2088 * S, 106.8456 * E) # 18
-    Sofia = wgs84.latlon(42.6977 * N, 23.3219 * E) # 19
-    Madrid = wgs84.latlon(40.4168 * N, 3.7038 * W) # 20
-    Copenhagen = wgs84.latlon(55.6761 * N, 12.5683 * E) # 21
-    Budapest = wgs84.latlon(47.4979 * N, 19.0402 * E) # 22
-    Hamburg = wgs84.latlon(53.5511 * N, 9.9937 * E) # 23
-    Hanoi = wgs84.latlon(21.0278 * N, 105.8342 * E) # 24
-    Sao_Paulo = wgs84.latlon(23.5505 * S, 46.6333 * W) # 25
-    Buenos_Aires = wgs84.latlon(34.6037 * S, 58.3816 * W) # 26
-    Warsaw = wgs84.latlon(52.2297 * N, 21.0122 * E) # 27
-    Bangkok = wgs84.latlon(13.7563 * N, 100.5018 * E) # 28
-    Buchararest = wgs84.latlon(44.4268 * N, 26.1025 * E) # 29
-    Helsinki = wgs84.latlon(60.1699 * N, 24.9384 * E) # 30
-    Mumbai = wgs84.latlon(19.0760 * N, 72.8777 * E) # 31
-    Prague = wgs84.latlon(50.0755 * N, 14.4378 * E) # 32
-    Brussels = wgs84.latlon(50.8503 * N, 4.3517 * E) # 33
-    St_Petersburg = wgs84.latlon(59.9343 * N, 30.3351 * E) # 34
-    Dusseldorf = wgs84.latlon(51.2277 * N, 6.7735 * E) # 35
-    Washington = wgs84.latlon(38.9072 * N, 77.0369 * W) # 36
-    Chennai = wgs84.latlon(13.0827 * N, 80.2707 * E) # 37
-    Kuala_Lumpur = wgs84.latlon(3.1390 * N, 101.6869 * E) # 38
-    Rio_de_Janeiro = wgs84.latlon(22.9068 * S, 43.1729 * W) # 39
-    Oslo = wgs84.latlon(59.9139 * N, 10.7522 * E) # 40
-    Mexico_City = wgs84.latlon(19.4326 * N, 99.1332 * W) # 41
-    Beijing = wgs84.latlon(39.9042 * N, 116.4074 * E) # 42    
-    Zurich = wgs84.latlon(47.3769 * N, 8.5417 * E) # 43
-    Sydney = wgs84.latlon(33.8688 * S, 151.2093 * E) # 44
-    Santiago = wgs84.latlon(33.4489 * S, 70.6693 * W) # 45
-    Toronto = wgs84.latlon(43.6532 * N, 79.3832 * W) # 46
-    Bratislava = wgs84.latlon(48.1486 * N, 17.1077 * E) # 47
-    Seoul = wgs84.latlon(37.5665 * N, 126.9780 * E) # 48
-    Taipei = wgs84.latlon(25.0330 * N, 121.5654 * E) # 49
-    Riyadh = wgs84.latlon(24.7136 * N, 46.6753 * E) # 50
-
     city_list = [Stockholm, New_York, Frankfurt, Paris, Amsterdam, London, Singapore, Jakarta, Marseille, Mumbai, Tokyo, Hong_Kong, Los_Angeles, Hanoi, Miami, Sao_Paulo, Madrid, Washington, Rio_de_Janeiro, Milan, Vienna, Moscow, Istanbul, San_Francisco, Sofia, Copenhagen, Budapest, Hamburg, Buenos_Aires, Warsaw, Bangkok, Buchararest, Helsinki, Prague, Brussels, St_Petersburg, Dusseldorf, Chennai, Kuala_Lumpur, Oslo, Mexico_City, Beijing, Zurich, Sydney, Santiago, Toronto, Bratislava, Seoul, Taipei, Riyadh]
 
     # Also need to create a range of random locations on the globe (to include oceans)
@@ -3712,9 +3783,9 @@ def print_global_counters():
     string += f"  Number of packets dropped due to TTL expiration: {num_max_TTL_packets_dropped} ({(num_max_TTL_packets_dropped/adjusted_num_packets_sent)*100:.1f}%)\n"
     for r_sat in sat_object_list:
         if r_sat.congestion_cnt > 0:
-            string += f"  Satellite {r_sat.sat_satnum} congestion count: {r_sat.congestion_cnt}\n"
+            string += f"  Satellite {r_sat.sat.model.satnum} congestion count: {r_sat.congestion_cnt}\n"
     if num_packets_received > 0:
-        string += f"Average packet distance: {total_distance_traveled // num_packets_received:,.0f}\n"
+        string += f"Average packet distance: {total_distance_traveled // num_packets_received:,.0f}km\n"
         string += f"Average packet hop count: {total_hop_count // num_packets_received}\n"
     else:
         string += f"No packets received!"
@@ -3816,9 +3887,9 @@ def print_configured_options():
     string += f"  Packets generated per interval: {packets_generated_per_interval}\n"
     string += f"  Do QoS: {do_qos}\n"
     if csv_output:
-        string += f"  CSV output: {csv_output}\n"
+        string += f"  Do CSV output: Yes, to file: {csv_output}\n"
     else:
-        string += f"  No CSV output\n"
+        string += f"  Do CSV output: False\n"
 
     print(string)
 
@@ -3854,7 +3925,7 @@ def parse_command_line_arguments():
     argumentList = sys.argv[1:]
     options = "hmut:pr:i:n:odasc:k:ql:x:v:z:"
     long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "disruption_schedule_method=", "max_disruptions_per_interval", "csv_output=", "disruption_option_string="]
-    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify disruption scheduling method", "specify max number of disruptions per time interval", "specify csv output file name", "specify disruption option string for methods that require it ('type_percent_duration_numIntervals')"]
+    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify disruption scheduling method", "specify max number of disruptions per time interval", "specify csv output file name", "specify disruption option string for methods that require it ('type,percent,duration,numIntervals')"]
     try:
         arguments, values = getopt.getopt(argumentList, options, long_options)
     except getopt.error as err:
@@ -3994,8 +4065,10 @@ def main ():
         alt_build_packet_schedule()
     elif packet_schedule_method == 'file':
         load_packet_schedule_from_file()
+    elif packet_schedule_method == 'EW_high_latitude':
+        build_EW_high_latitude_packet_schedule()
     else:
-        print(f"Unkown packet schedule method specified: {packet_schedule_method}")
+        print(f"Unknown packet schedule method specified: {packet_schedule_method}")
         exit()
     
     # ---------- DISRUPTING ------------
@@ -4009,6 +4082,8 @@ def main ():
             build_disruption_schedule_static()
         elif disruption_schedule_method == 'percent':
             build_disruption_schedule_percent() # gets configuration from global 'disruption_option_string'
+        elif 'type_' in disruption_schedule_method:
+            build_type_x_disruption_schedule() # gets configuration from global 'disruption_option_string'
         global distributed_max_hop_count
         distributed_max_hop_count = int(distributed_max_hop_count * 1.5) # increase max hop count for disributed routing to account for disruptions
         apply_disruption_schedule() # apply disruptions for time increment 0 (since disruptions are applied at the end of the time increment)
