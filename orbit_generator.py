@@ -228,6 +228,7 @@ Puerto_Villamil = wgs84.latlon(0.9333 * S, 90.9500 * W) # Disruption location
 Tres_Lagos = wgs84.latlon(50.3333 * S, 72.2667 * W) # Disruption location
 Shelby = wgs84.latlon(48.5000 * N, 111.8500 * W) # Disruption location
 Great_Falls = wgs84.latlon(47.5000 * N, 111.3000 * W) # Disruption location
+Glasgow = wgs84.latlon(48.2000 * N, 106.6333 * W) # Disruption location
 
 class RoutingSat:
     def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _succeeding_orbit_number, _preceeding_orbit_number, _fore_sat_index, _aft_sat_index):
@@ -284,7 +285,8 @@ class RoutingSat:
         
         global num_packets_dropped, num_max_hop_packets_dropped, num_route_calc_failures, num_packets_received, total_distance_traveled, total_hop_count, no_sat_overhead_cnt, draw_static_orbits
         sent_packet = False
-        print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: processing {len(self.packet_qu)} packets in queue")
+        #print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: processing {len(self.packet_qu)} packets in queue")
+        drop_packet_list = []
         for packet in self.packet_qu:
             if do_qos and self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval:  # First, check if satellite exceeded packet bandwidth; notify neighbors of congestion if so
                 print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet bandwidth exceeded.  Congestion on-demand sent to neighbors")
@@ -293,7 +295,8 @@ class RoutingSat:
                 if csv_output:
                     csv_congestion.write(f"{cur_time_increment},{self.sat.model.satnum},{self.congestion_cnt}\n")
                 self.rollover_packet_qu.insert(0, packet) # can't send more packets due to congestion; put packet in rollover queue for next time interval
-                self.packet_qu.remove(packet)
+                #self.packet_qu.remove(packet)
+                drop_packet_list.append(packet)
                 continue
             if 'dest_satnum' in packet: # Check for destination by satnum for methods that use it (TriCoord)
                 if packet['dest_satnum'] == self.sat.model.satnum:
@@ -326,7 +329,8 @@ class RoutingSat:
                             draw_static_orbits = False
                         #if len(packet['prev_hop_list']) > 30:
                         #    draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
-                    self.packet_qu.remove(packet)
+                    #self.packet_qu.remove(packet)
+                    drop_packet_list.append(packet)
                     sent_packet = True
                     self.packets_sent_cnt += 1
                     continue
@@ -349,7 +353,8 @@ class RoutingSat:
                     if draw_static_orbits:
                         if len(packet['prev_hop_list']) > 30:
                             draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
-                    self.packet_qu.remove(packet)
+                    #self.packet_qu.remove(packet)
+                    drop_packet_list.append(packet)
                     sent_packet = True
                     self.packets_sent_cnt += 1
                     continue
@@ -362,7 +367,8 @@ class RoutingSat:
                 num_packets_dropped += 1
                 if plot_dropped_packets:
                     draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"distributed link-state dropped packet - {len(packet['prev_hop_list'])} hops", draw_lines = True, draw_sphere = True)
-                self.packet_qu.remove(packet)
+                #self.packet_qu.remove(packet)
+                drop_packet_list.append(packet)
                 continue
             else: # Fourth, find next hop for packet; add distance of hop to counter; and add to next hop's packet queue
                 #print(f"::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Finding next hop.")
@@ -380,7 +386,8 @@ class RoutingSat:
                 if target_satnum is None:
                     print(f"\t::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} - could not find next hop for packet.  Rolling packet to next time increment (current TTL: {packet['TTL']}).")
                     self.rollover_packet_qu.insert(0, packet) # no next hop found; put packet in rollover queue for next time interval
-                    self.packet_qu.remove(packet)
+                    #self.packet_qu.remove(packet)
+                    drop_packet_list.append(packet)
                     continue
                 elif type(target_satnum) is list: # some distributed routing methods may provide a list of next hops
                     next_hop_list = target_satnum
@@ -392,9 +399,14 @@ class RoutingSat:
                 target_distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, target_satnum)
                 packet['distance_traveled'] += target_distance
                 add_to_packet_qu_by_satnum(target_satnum, packet)  # add packet to target sat's packet queue
-                self.packet_qu.remove(packet)
+                #self.packet_qu.remove(packet)
+                drop_packet_list.append(packet)
                 sent_packet = True
                 self.packets_sent_cnt += 1                
+        for drop_packet in drop_packet_list:
+            self.packet_qu.remove(drop_packet)
+        if len(self.packet_qu) > 0:
+            print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet queue not empty after processing!  Packets remaining: {len(self.packet_qu)}")
         if sent_packet:
             return 0
         else:
@@ -415,7 +427,7 @@ class RoutingSat:
         neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
 
         # process packets in queue
-        for packet in self.packet_qu:
+        for packet in reversed(self.packet_qu):
             if self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval:
                 break
             if self.sat.model.satnum  == packet['dest_satnum']:
@@ -730,7 +742,7 @@ class RoutingSat:
 
         if len(avail_neigh_routing_sats) == 0:
             print(f"::find_next_link_state_hop:: Sat {self.sat.model.satnum}:  No available neighboring satellites to route to!")
-            self.print_list_of_interface_status()
+            #self.print_list_of_interface_status()
             return None
         
         next_hop_satnum = None
@@ -759,6 +771,9 @@ class RoutingSat:
         #    print(f"::find_next_link_state_hop:: next_hop_satnum: {next_hop_satnum} not in self.neigh_state_dict - current time increment: {cur_time_increment}")
         if next_hop_satnum is None:
             print(f"::find_next_link_state_hop:: Could not find next hop; returning 'None' - current time increment: {cur_time_increment}")
+        elif next_hop_satnum is self.sat.model.satnum:
+            print(f"::find_next_link_state_hop:: next_hop_satnum: {next_hop_satnum} is the same as the current satellite; returning 'None' - current time increment: {cur_time_increment}")
+            next_hop_satnum = None
         return next_hop_satnum
         
         
@@ -1318,20 +1333,21 @@ class RoutingSat:
 
         # publish internal constellation link state dict to neighbor's link state updates list
         for neigh_r_sat in neigh_routing_sat_list:
-            neigh_r_sat.constellation_link_state_updates_list.append(self.constellation_link_state_dict)
+            neigh_r_sat.constellation_link_state_updates_list.append(self.constellation_link_state_dict.copy())
 
     def add_updates_to_internal_constellation_link_state_dict(self):
         self.constellation_link_state_dict_changed = False
-        for update in self.constellation_link_state_updates_list:
-            for key in update.keys():
+        for update_dict in self.constellation_link_state_updates_list:
+            for key in update_dict.keys():
                 if key in self.constellation_link_state_dict.keys():
-                    _, dict_update_time = update[key]
+                    _, dict_update_time = update_dict[key]
                     if dict_update_time > self.constellation_link_state_dict[key][1]:
-                        self.constellation_link_state_dict[key] = update[key]
+                        self.constellation_link_state_dict[key] = update_dict[key]
                         self.constellation_link_state_dict_changed = True
                 else:
-                    self.constellation_link_state_dict[key] = update[key]
+                    self.constellation_link_state_dict[key] = update_dict[key]
                     self.constellation_link_state_dict_changed = True
+        self.constellation_link_state_updates_list.clear()
 
 
     # update the state of links to all direct neighbor sats
@@ -1495,31 +1511,31 @@ class RoutingSat:
         lat, lon = self.get_sat_lat_lon_degrees()
         string = ""
         string += f"::print_list_of_interface_status::  Sat: {self.sat.model.satnum} ({lat:.2f},{lon:.2f})\n"
-        string += f"\tFore interface up:\t\t\t\t{self.fore_int_up}; Fore interface sat satnum: {self.fore_sat_satnum}"
+        string += f"\tFore interface up:\t\t{self.fore_int_up}; Fore interface sat satnum: {self.fore_sat_satnum}"
         if self.fore_sat_satnum is not None and self.fore_sat_satnum in self.neigh_state_dict:
             string += f"; Fore interface connection up: {self.neigh_state_dict[self.fore_sat_satnum]['connection_up']}"
         elif self.fore_sat_satnum is not None:
             string += f"; Fore interface sat satnum not in neigh_state_dict"
         string += "\n"
-        string += f"\tAft interface up:\t\t\t\t{self.aft_int_up}; Aft interface sat satnum: {self.aft_sat_satnum}"
+        string += f"\tAft interface up:\t\t{self.aft_int_up}; Aft interface sat satnum: {self.aft_sat_satnum}"
         if self.aft_sat_satnum is not None and self.aft_sat_satnum in self.neigh_state_dict:
             string += f"; Aft interface connection up: {self.neigh_state_dict[self.aft_sat_satnum]['connection_up']}"
         elif self.aft_sat_satnum is not None:
             string += f"; Aft interface sat satnum not in neigh_state_dict"
         string += "\n"
-        string += f"\tPort interface up:\t\t\t\t{self.port_int_up}; Port interface sat satnum: {self.port_sat_satnum}"
+        string += f"\tPort interface up:\t\t{self.port_int_up}; Port interface sat satnum: {self.port_sat_satnum}"
         if self.port_sat_satnum is not None and self.port_sat_satnum in self.neigh_state_dict:
             string += f"; Port interface connection up: {self.neigh_state_dict[self.port_sat_satnum]['connection_up']}"
         elif self.port_sat_satnum is not None:
             string += f"; Port interface sat satnum not in neigh_state_dict"
         string += "\n"
-        string += f"\tStarboard interface up:\t\t\t{self.starboard_int_up}; Starboard interface sat satnum: {self.starboard_sat_satnum}"
+        string += f"\tStarboard interface up:\t\t{self.starboard_int_up}; Starboard interface sat satnum: {self.starboard_sat_satnum}"
         if self.starboard_sat_satnum is not None and self.starboard_sat_satnum in self.neigh_state_dict:
             string += f"; Starboard interface connection up: {self.neigh_state_dict[self.starboard_sat_satnum]['connection_up']}"
         elif self.starboard_sat_satnum is not None:
             string += f"; Starboard interface sat satnum not in neigh_state_dict"
         string += "\n"
-        string += f"\tFore port interface up:\t\t\t{self.fore_port_int_up}; Fore port interface sat satnum: {self.fore_port_sat_satnum}"
+        string += f"\tFore port interface up:\t\t{self.fore_port_int_up}; Fore port interface sat satnum: {self.fore_port_sat_satnum}"
         if self.fore_port_sat_satnum is not None and self.fore_port_sat_satnum in self.neigh_state_dict:
             string += f"; Fore port interface connection up: {self.neigh_state_dict[self.fore_port_sat_satnum]['connection_up']}"
         elif self.fore_port_sat_satnum is not None:
@@ -1531,13 +1547,13 @@ class RoutingSat:
         elif self.fore_starboard_sat_satnum is not None:
             string += f"; Fore starboard interface sat satnum not in neigh_state_dict"
         string += "\n"
-        string += f"\tAft port interface up:\t\t\t{self.aft_port_int_up}; Aft port interface sat satnum: {self.aft_port_sat_satnum}"
+        string += f"\tAft port interface up:\t\t{self.aft_port_int_up}; Aft port interface sat satnum: {self.aft_port_sat_satnum}"
         if self.aft_port_sat_satnum is not None and self.aft_port_sat_satnum in self.neigh_state_dict:
             string += f"; Aft port interface connection up: {self.neigh_state_dict[self.aft_port_sat_satnum]['connection_up']}"
         elif self.aft_port_sat_satnum is not None:
             string += f"; Aft port interface sat satnum not in neigh_state_dict"
         string += "\n"
-        string += f"\tAft starboard interface up:\t\t{self.aft_starboard_int_up}; Aft starboard interface sat satnum: {self.aft_starboard_sat_satnum}"
+        string += f"\tAft starboard interface up:\t{self.aft_starboard_int_up}; Aft starboard interface sat satnum: {self.aft_starboard_sat_satnum}"
         if self.aft_starboard_sat_satnum is not None and self.aft_starboard_sat_satnum in self.neigh_state_dict:
             string += f"; Aft starboard interface connection up: {self.neigh_state_dict[self.aft_starboard_sat_satnum]['connection_up']}"
         elif self.aft_starboard_sat_satnum is not None:
@@ -1572,7 +1588,7 @@ class RoutingSat:
         global cur_time_increment
         next_hop_satnum = None
 
-        print(f"::link_state_routing_method_dijkstar:: Building graph for satnum: {self.sat.model.satnum}, time increment {cur_time_increment}")
+        #print(f"::link_state_routing_method_dijkstar:: Building graph for satnum: {self.sat.model.satnum}, time increment {cur_time_increment}")
         graph = Graph()
         for target_satnum in self.constellation_link_state_dict.keys():
             known_neighbors_dict, _ = self.constellation_link_state_dict[target_satnum]
@@ -1581,13 +1597,14 @@ class RoutingSat:
                     graph.add_edge(target_satnum, neigh_satnum, known_neighbors_dict[neigh_satnum]['distance'])
                 else:
                     graph.add_edge(target_satnum, neigh_satnum, 1)
-        print(f"::link_state_routing_method_dijkstar:: Graph built for sat {self.sat.model.satnum}, finding path to {dest_satnum}")
+        #print(f"::link_state_routing_method_dijkstar:: Graph built for sat {self.sat.model.satnum}, finding path to {dest_satnum}")
         try:
             path = find_path(graph, self.sat.model.satnum, dest_satnum)
-            print(f"::link_state_routing_method_dijkstar:: Path found, path: {path}")
+            #print(f"::link_state_routing_method_dijkstar:: Path found, path: {path}")
             next_hop_satnum = path.nodes[1]
         except Exception as e:
-            print(f"::link_state_routing_method_dijkstar:: Path not found, exception: {e}")
+            print(f"::link_state_routing_method_dijkstar:: Sat {self.sat.model.satnum}; Path not found to dest satnum {dest_satnum}.\n\texception: {e}")
+            print(f"\tList of current neighbor satnums: {self.get_list_of_cur_neighbor_satnums()}")
         
         return next_hop_satnum
     
@@ -1796,44 +1813,32 @@ def get_size(obj, seen=None):
 
 # multi-threaded version of publish_state_to_neighbors()
 def mt_publish_state_to_neighbors(thread_num):
-    sat_object_range = floor(len(sat_object_list) / num_threads)
-    start = thread_num * sat_object_range
-    end = start + sat_object_range
-    if thread_num == num_threads - 1:
-        end = len(sat_object_list)
+    sat_object_range = get_sat_object_range ()
+    start, end = get_start_end_values (sat_object_range, thread_num)
     print(f"::mt_update_neigh_state():: thread {thread_num} : publishing states to neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
         r_sat.publish_state_to_neighbors()
     print(f"::mt_update_neigh_state():: thread {thread_num} : finished publishing states to neighbors", end='\r')
 
 def mt_update_neigh_state_table(thread_num):
-    sat_object_range = floor(len(sat_object_list) / num_threads)
-    start = thread_num * sat_object_range
-    end = start + sat_object_range
-    if thread_num == num_threads - 1:
-        end = len(sat_object_list)
+    sat_object_range = get_sat_object_range ()
+    start, end = get_start_end_values (sat_object_range, thread_num)
     print(f"::mt_update_neigh_state_table():: thread {thread_num} : updating internal states of neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
         r_sat.update_neigh_state_table()
     print(f"::mt_update_neigh_state_table() :: thread {thread_num} : finished updating internal neighbor state table", end='\r')
 
 def mt_publish_constellation_link_state_dict_to_neighbors(thread_num, update_neighbor_list):
-    sat_object_range = floor(len(sat_object_list) / num_threads)
-    start = thread_num * sat_object_range
-    end = start + sat_object_range
-    if thread_num == num_threads - 1:
-        end = len(sat_object_list)
+    sat_object_range = get_sat_object_range ()
+    start, end = get_start_end_values (sat_object_range, thread_num)
     print(f"::mt_publish_constellation_link_state_dict_to_neighbors() :: thread {thread_num} : publishing constellation link state dict to neighbors from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
         r_sat.publish_constellation_link_state_dict_to_neighbors(update_neighbor_list)
     print(f"::mt_publish_constellation_link_state_dict_to_neighbors() :: thread {thread_num} : finished publishing constellation link state dict to neighbors", end='\r')
 
 def mt_add_updates_to_internal_constellation_link_state_dict(thread_num):
-    sat_object_range = floor(len(sat_object_list) / num_threads)
-    start = thread_num * sat_object_range
-    end = start + sat_object_range
-    if thread_num == num_threads - 1:
-        end = len(sat_object_list)
+    sat_object_range = get_sat_object_range ()
+    start, end = get_start_end_values (sat_object_range, thread_num)
     print(f"::mt_add_updates_to_internal_constellation_link_state_dict() :: thread {thread_num} : updating internal constellation link state dict from {start} to {end}", end='\r')
     for r_sat in sat_object_list[start:end]:
         r_sat.add_updates_to_internal_constellation_link_state_dict()
@@ -1849,6 +1854,10 @@ def mt_update_neigh_state(thread_num):
     for r_sat in sat_object_list[start:end]:
         r_sat.update_neigh_state()
 """
+
+def clear_line():
+    print("\t\t\t\t\t\t\t\t", end="\r") # clear the line
+
 def all_sats_update_neigh_state():
     print("::all_sats_update_neigh_state() :: publishing states to neighbors")
     # publish link state to neighbors first!
@@ -1864,6 +1873,7 @@ def all_sats_update_neigh_state():
         for r_sat in sat_object_list:
             print(f"r_sat.sat.model.satnum: {r_sat.sat.model.satnum}", end="\r")
             r_sat.publish_state_to_neighbors() 
+    clear_line()
     print("\n::all_sats_update_neigh_state() :: updating internal states of neighbors")
 
     # now update those link states internally
@@ -1879,12 +1889,15 @@ def all_sats_update_neigh_state():
         for r_sat in sat_object_list:
             r_sat.update_neigh_state_table()
         print("\n")
+        clear_line ()
 
 def all_sats_update_constellation_link_state_dicts(initial_update = False):
-    print("::all_sats_update_constellation_link_state_dicts() :: updating constellation link state dictionaries")
     keep_going = True # if internal_constellation_link_states need initial updates, keep going until no more internal dictionaries are updated
+    if initial_update:
+        print("::all_sats_update_constellation_link_state_dicts() :: Initial constellation link state dictionary updates; will repeat several times.")
     while (keep_going):
         keep_going = False
+        print("::all_sats_update_constellation_link_state_dicts() :: updating direct link entries and publishing constellation link state dictionaries to neighbors.")
         if do_multithreading:
             thread_list = []
             for index in range(num_threads):
@@ -1897,6 +1910,7 @@ def all_sats_update_constellation_link_state_dicts(initial_update = False):
             for r_sat in sat_object_list:
                 r_sat.publish_constellation_link_state_dict_to_neighbors(False)
             print("\n")
+        print("::all_sats_update_constellation_link_state_dicts() :: Incorporating received updates into internal constellation link state dictionaries.")
         if do_multithreading:
             thread_list = []
             for index in range(num_threads):
@@ -1912,6 +1926,7 @@ def all_sats_update_constellation_link_state_dicts(initial_update = False):
         if initial_update:
             for r_sat in sat_object_list:
                 if r_sat.constellation_link_state_dict_changed:
+                    print("\t::all_sats_update_constellation_link_state_dicts() :: link state updates not yet stabilized; repeating.")
                     keep_going = True
                     break
 
@@ -2187,12 +2202,14 @@ def increment_time():
     cur_time_next = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
     # reset packet sent counters for all sats and decrement all packet TTLs, deleting packets as appropriate
     for r_sat in sat_object_list:
-        r_sat.packets_sent_cnt = 0
+        r_sat.packets_sent_cnt = 0 # reset counter for this time increment
         if len(r_sat.rollover_packet_qu) > 0: # move rollover packets to packet queue for processing during this time interval
             for rollover_packet in r_sat.rollover_packet_qu:
                 r_sat.packet_qu.insert(0, rollover_packet)
-                r_sat.rollover_packet_qu.remove(rollover_packet)
+                #r_sat.rollover_packet_qu.remove(rollover_packet)
+            r_sat.rollover_packet_qu.clear()
         if len(r_sat.packet_qu) > 0:
+            drop_packet_list = []
             for packet in r_sat.packet_qu:
                 old_TTL = packet['TTL']
                 packet['TTL'] -= time_interval # decrement by the number of seconds in each time increment
@@ -2202,8 +2219,12 @@ def increment_time():
                     print(f"::increment_time:: Packet dropped due to TTL for satnum: {r_sat.sat.model.satnum}, location: {lat}, {lon} (old TTL: {old_TTL} - time_increment: {time_interval} = {packet['TTL']})")
                     if csv_output:
                         csv_ttl.write(f"{cur_time_increment},{r_sat.sat.model.satnum}, {lat}, {lon},{packet['prev_hop_list']}\n")
+                    drop_packet_list.append(packet)
                     num_max_TTL_packets_dropped += 1
-                    r_sat.packet_qu.remove(packet)
+                    #r_sat.packet_qu.remove(packet)
+            for packet in drop_packet_list:
+                r_sat.packet_qu.remove(packet)
+            drop_packet_list.clear()
     cur_time_increment += 1
     #print(f"::increment_time:: Current time incremented to: {cur_time.utc_jpl()}, time increment: {cur_time_increment}, scheduled time intervals: {num_time_intervals}")
     if do_disruptions: apply_disruption_schedule() # apply any disruptions that are scheduled for this time increment
@@ -3285,6 +3306,7 @@ def distributed_link_state_routing():
         # 1. Work through packet scheduler at each time interval and send all scheduled packets
         if cur_time_increment in packet_schedule:
             packet_send_list = packet_schedule[cur_time_increment]
+            print(f"::disributed_link_state_routing::  Sending {len(packet_send_list)} scheduled packets from ground terminals")
             for packet in packet_send_list:
                 src, dest = packet
                 if send_distributed_routing_packet_from_source(src, dest) == -1:
@@ -3913,6 +3935,17 @@ def static_build_packet_schedule():
                 else:
                         packet_schedule[interval].append((city_list[index2], city_list[index1]))
             
+def get_sat_object_range():
+    global sat_object_list, num_threads
+    return floor (len (sat_object_list) / num_threads)
+
+def get_start_end_values (sat_object_range, thread_num):
+    global num_threads, sat_object_list
+    start = thread_num * sat_object_range
+    end = start + sat_object_range - 1
+    if thread_num == num_threads - 1:
+        end = len (sat_object_list) - 1
+    return start, end
 
 def print_global_counters():
     if num_packets_sent == 0:
@@ -4160,6 +4193,7 @@ def main ():
 
     # Create a list of satellite objects
     build_constellation(source_sat)
+    print(f"Built constellation with {len(sat_object_list)} satellites")
 
     # Initialize simulation start time
     global cur_time, cur_time_next, routing_name, csv_output
