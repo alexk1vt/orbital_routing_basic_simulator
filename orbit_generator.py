@@ -85,6 +85,7 @@ num_time_intervals = 5
 # Global counters
 no_sat_overhead_cnt = 0
 num_packets_dropped = 0
+prev_incr_num_packets_dropped = 0
 num_max_hop_packets_dropped = 0 # this is a subset of num_packets_dropped
 num_route_calc_failures = 0
 num_disrupted_packets_dropped = 0
@@ -229,6 +230,7 @@ Tres_Lagos = wgs84.latlon(50.3333 * S, 72.2667 * W) # Disruption location
 Shelby = wgs84.latlon(48.5000 * N, 111.8500 * W) # Disruption location
 Great_Falls = wgs84.latlon(47.5000 * N, 111.3000 * W) # Disruption location
 Glasgow = wgs84.latlon(48.2000 * N, 106.6333 * W) # Disruption location
+Reims = wgs84.latlon(49.2500 * N, 4.0333 * E) # Disruption location
 
 class RoutingSat:
     def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _succeeding_orbit_number, _preceeding_orbit_number, _fore_sat_index, _aft_sat_index):
@@ -311,7 +313,7 @@ class RoutingSat:
                         expected_max_hops = packet['expected_max_hops']
                         print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops (expected min: {expected_min_hops}/max: {expected_max_hops}).  Total distance: {int(distance_traveled):,.0f}km (transit time: {(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f} seconds)")
                         if csv_output:
-                            string = f"{cur_time_increment},{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{secs_per_km * int(distance_traveled):.2f},{expected_min_hops},{expected_max_hops},{packet['prev_hop_list']}\n"
+                            string = f"{cur_time_increment},{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f},{expected_min_hops},{expected_max_hops},{packet['prev_hop_list']}\n"
                             csv_file.write(string)
                     else:
                         print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f} seconds)")
@@ -405,6 +407,7 @@ class RoutingSat:
                 self.packets_sent_cnt += 1                
         for drop_packet in drop_packet_list:
             self.packet_qu.remove(drop_packet)
+        drop_packet_list.clear ()
         if len(self.packet_qu) > 0:
             print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet queue not empty after processing!  Packets remaining: {len(self.packet_qu)}")
         if sent_packet:
@@ -427,7 +430,8 @@ class RoutingSat:
         neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
 
         # process packets in queue
-        for packet in reversed(self.packet_qu):
+        drop_packet_list = []
+        for packet in self.packet_qu:
             if self.packets_sent_cnt >= packet_bandwidth_per_sec * time_interval:
                 break
             if self.sat.model.satnum  == packet['dest_satnum']:
@@ -435,7 +439,8 @@ class RoutingSat:
                     print(f"Reached final satnum, but not overhead destination terminal!")
                     no_sat_overhead_cnt += 1
                     num_packets_dropped += 1
-                    self.packet_qu.remove(packet)
+                    #self.packet_qu.remove(packet)
+                    drop_packet_list.append(packet)
                     continue
                 _, _, dist = (self.sat - packet['dest_gs']).at(cur_time).altaz()
                 packet['distance_traveled'] += dist.km
@@ -451,7 +456,8 @@ class RoutingSat:
                 num_packets_received += 1
                 total_distance_traveled += distance_traveled
                 total_hop_count += hop_count
-                self.packet_qu.remove(packet)
+                #self.packet_qu.remove(packet)
+                drop_packet_list.append(packet)
                 sent_packet = True
                 self.packets_sent_cnt += 1
             else:
@@ -463,13 +469,18 @@ class RoutingSat:
                     add_to_packet_qu_by_satnum(target_satnum, packet) # add packet to target sat's packet queue
                     
                     # packet has been given to next satellite, so remove from current satellite's packet queue
-                    self.packet_qu.remove(packet)
+                    #self.packet_qu.remove(packet)
+                    drop_packet_list.append(packet)
                     sent_packet = True
                     self.packets_sent_cnt += 1
                 else:
                     print(f"({self.sat.model.satnum})No connection to satnum {target_satnum}")
-                    self.packet_qu.remove(packet)
+                    #self.packet_qu.remove(packet)
+                    drop_packet_list.append(packet)
                     num_route_calc_failures += 1
+        for drop_packet in drop_packet_list:
+            self.packet_qu.remove(drop_packet)
+        drop_packet_list.clear ()
         if sent_packet:
             return 0
         else:
@@ -1271,33 +1282,34 @@ class RoutingSat:
         # possible interfaces: 'fore_port', 'fore_starboard', 'aft_port', 'aft_starboard'
         if len(preceeding_orbit_satnum_list) > 0:
             for satnum_tuple in preceeding_orbit_satnum_list:
-                if satnum_tuple[1] == 'port' and self.port_int_up:
-                    self.port_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'starboard' and self.starboard_int_up:
-                    self.starboard_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'fore_port' and self.fore_port_int_up:
-                    self.fore_port_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'fore_starboard' and self.fore_starboard_int_up:
-                    self.fore_starboard_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'aft_port' and self.aft_port_int_up:
-                    self.aft_port_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'aft_starboard' and self.aft_starboard_int_up:
-                    self.aft_starboard_sat_satnum = satnum_tuple[0]
+                if (satnum_tuple[0] not in self.neigh_state_dict) or (self.neigh_state_dict[satnum_tuple[0]]['connection_up']):
+                    if satnum_tuple[1] == 'port' and self.port_int_up:
+                            self.port_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'starboard' and self.starboard_int_up:
+                        self.starboard_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'fore_port' and self.fore_port_int_up:
+                        self.fore_port_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'fore_starboard' and self.fore_starboard_int_up:
+                        self.fore_starboard_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'aft_port' and self.aft_port_int_up:
+                        self.aft_port_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'aft_starboard' and self.aft_starboard_int_up:
+                        self.aft_starboard_sat_satnum = satnum_tuple[0]
         if len(succeeding_orbit_satnum_list) > 0:
             for satnum_tuple in succeeding_orbit_satnum_list:
-                if satnum_tuple[1] == 'port' and self.port_int_up:
-                    self.port_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'starboard' and self.starboard_int_up:
-                    self.starboard_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'fore_port' and self.fore_port_int_up:
-                    self.fore_port_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'fore_starboard' and self.fore_starboard_int_up:
-                    self.fore_starboard_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'aft_port' and self.aft_port_int_up:
-                    self.aft_port_sat_satnum = satnum_tuple[0]
-                elif satnum_tuple[1] == 'aft_starboard' and self.aft_starboard_int_up:
-                    self.aft_starboard_sat_satnum = satnum_tuple[0]
-
+                if (satnum_tuple[0] not in self.neigh_state_dict) or (self.neigh_state_dict[satnum_tuple[0]]['connection_up']):
+                    if satnum_tuple[1] == 'port' and self.port_int_up:
+                        self.port_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'starboard' and self.starboard_int_up:
+                        self.starboard_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'fore_port' and self.fore_port_int_up:
+                        self.fore_port_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'fore_starboard' and self.fore_starboard_int_up:
+                        self.fore_starboard_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'aft_port' and self.aft_port_int_up:
+                        self.aft_port_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'aft_starboard' and self.aft_starboard_int_up:
+                        self.aft_starboard_sat_satnum = satnum_tuple[0]
 
     def update_internal_constellation_link_state_dict(self, update_neighbor_list = True):
         if self.is_disrupted:
@@ -2194,7 +2206,7 @@ def apply_disruption_schedule():
         csv_disruption.write(string)
 
 def increment_time():
-    global cur_time, cur_time_next, time_scale, cur_time_increment, num_packets_dropped, num_max_TTL_packets_dropped
+    global cur_time, cur_time_next, time_scale, cur_time_increment, num_packets_dropped, prev_incr_num_packets_dropped, num_max_TTL_packets_dropped
     python_t = cur_time.utc_datetime()
     new_python_time = python_t + timedelta(seconds = time_interval)
     cur_time = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
@@ -2226,6 +2238,12 @@ def increment_time():
                 r_sat.packet_qu.remove(packet)
             drop_packet_list.clear()
     cur_time_increment += 1
+    cur_inc_num_packets_dropped = num_packets_dropped - prev_incr_num_packets_dropped
+    print(f"::increment_time:: Packets dropped during increment {cur_time_increment-1}: {cur_inc_num_packets_dropped}")
+    if csv_output:
+        csv_packet_loss.write(f"{cur_time_increment-1}, {cur_inc_num_packets_dropped}\n")
+    prev_incr_num_packets_dropped += cur_inc_num_packets_dropped
+
     #print(f"::increment_time:: Current time incremented to: {cur_time.utc_jpl()}, time increment: {cur_time_increment}, scheduled time intervals: {num_time_intervals}")
     if do_disruptions: apply_disruption_schedule() # apply any disruptions that are scheduled for this time increment
 
@@ -4210,7 +4228,7 @@ def main ():
     print_configured_options()
 
     if csv_output:
-        global csv_file, csv_writer, csv_ttl, csv_congestion, csv_max_hop, csv_disruption
+        global csv_file, csv_writer, csv_ttl, csv_congestion, csv_max_hop, csv_disruption, csv_packet_loss
         csv_file = open(csv_output, 'w')
         csv_ttl = open(csv_output+'_ttl.csv', 'w')
         csv_ttl.write("time_increment, satnum, sat_latitude, sat_longitude, prev_hop_list\n")
@@ -4220,6 +4238,9 @@ def main ():
         csv_max_hop.write("time_increment, satnum, hop_cnt, prev_hop_list\n")
         csv_disruption = open(csv_output+'_disruption.csv', 'w')
         csv_disruption.write("time_increment, applied_disruptions, removed_disruptions, ongoing_disruptions\n")
+        csv_packet_loss = open(csv_output+'_packet_loss.csv', 'w')
+        csv_packet_loss.write("time_increment, packet_loss_count\n")
+        csv_packet_loss.write("0,0\n")
         
 
     # ---------- TESTING ------------
@@ -4256,6 +4277,8 @@ def main ():
             print(f"Closed csv file: {csv_output+'_max_hop.csv'}")
             csv_disruption.close()
             print(f"Closed csv file: {csv_output+'_disruption.csv'}")
+            csv_packet_loss.close()
+            print(f"Closed csv file: {csv_output+'_packet_loss.csv'}")
         exit()
     
     # ---------- SCHEDULING ------------
@@ -4334,6 +4357,8 @@ def main ():
         print(f"Closed csv file: {csv_output+'_max_hop.csv'}")
         csv_disruption.close()
         print(f"Closed csv file: {csv_output+'_disruption.csv'}")
+        csv_packet_loss.close()
+        print(f"Closed csv file: {csv_output+'_packet_loss.csv'}")
     exit ()
 
     
