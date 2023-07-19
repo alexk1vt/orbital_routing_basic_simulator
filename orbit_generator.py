@@ -82,6 +82,7 @@ secs_per_km = 0.0000033
 cur_time_increment = 0
 time_interval = 60 # interval between time increments, measured in seconds
 num_time_intervals = 5
+link_state_update_interval = 1 # the number of time intervals between link state advertisements
 
 # Global counters
 no_sat_overhead_cnt = 0
@@ -277,6 +278,12 @@ class RoutingSat:
         self.link_disruption_ttl = [0, 0, 0, 0, 0, 0] # [fore, aft, port, starboard, fore_port, aft_port, fore_starboard, aft_starboard]
         self.zone_routing_table = {} # key: target_satnum, value: (next_hop_satnum, distance)
 
+    def has_available_connection(self):
+        if len (self.get_list_of_cur_sat_neighbors()) > 0:
+            return True
+        else:
+            return False
+    
     # ::: distributed routing packet structure: {'prev_hop_list': [prev_hop_list], 'next_hop_list': [next_hop_list], 'distance_traveled': dist, 'dest_gs': dest_gs, 'TTL': packet_TTL, 'dest_satnum': dest_satnum} - packet is at destination when satellite is above dest_gs
     def distributed_routing_link_state_process_packet_queue(self):
         if self.is_disrupted:
@@ -382,11 +389,14 @@ class RoutingSat:
                         del packet['next_hop_list']
                     print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet has next hop list.  Using next hop {target_satnum}.")
                 else:
+                    abort_route = False
                     if len(packet['prev_hop_list']) == 0: 
                         prev_hop = None
                     else:
                         prev_hop = packet['prev_hop_list'][-1]
-                    target_satnum = self.find_next_link_state_hop(avail_neigh_routing_sats, packet['dest_gs'], packet['dest_satnum'], prev_hop) # find_next_link_state_hop() is function that performs routing selection
+                        if 'abort_route' in packet and packet['abort_route'] == True:
+                            abort_route = True
+                    target_satnum = self.find_next_link_state_hop(avail_neigh_routing_sats, packet['dest_gs'], packet['dest_satnum'], prev_hop, abort_route) # find_next_link_state_hop() is function that performs routing selection
                 if target_satnum is None:
                     print(f"\t::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} - could not find next hop for packet.  Rolling packet to next time increment (current TTL: {packet['TTL']}).")
                     self.rollover_packet_qu.insert(0, packet) # no next hop found; put packet in rollover queue for next time interval
@@ -409,6 +419,10 @@ class RoutingSat:
                     packet['next_hop_list'] = next_hop_list
                     print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: find_next_link_state_hop returned list.  Using next hop {target_satnum} and attaching list: {next_hop_list}")
                 #print(f"::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} setting next hop to satnum: {target_satnum}")
+                if target_satnum in packet['prev_hop_list']:
+                    packet['abort_route'] = True
+                else:
+                    packet['abort_route'] = False
                 packet['prev_hop_list'].append(self.sat.model.satnum)
                 target_distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, target_satnum)
                 packet['distance_traveled'] += target_distance
@@ -737,7 +751,7 @@ class RoutingSat:
         print(f"\nSpherical position difference of self_sat and sat2:\n\tright ascension: {diff_ra}\n\tdeclination: {diff_dec}\n\tdistance:{diff_distance}")
 
     # calculates satnum of next hop or None if no next hop satellite is available
-    def find_next_link_state_hop(self, avail_neigh_routing_sats, dest_gs, dest_satnum, prev_hop_satnum):
+    def find_next_link_state_hop(self, avail_neigh_routing_sats, dest_gs, dest_satnum, prev_hop_satnum, abort_route = False):
         global routing_name
         # update current neighboring satellites on each interface
         #self.update_current_neighbor_sats()
@@ -770,7 +784,7 @@ class RoutingSat:
         
         next_hop_satnum = None
         if routing_name == "Distributed Link State TriCoord":
-            next_hop_satnum = self.link_state_routing_method_triCoord(avail_neigh_routing_sats, dest_satnum, prev_hop_satnum)
+            next_hop_satnum = self.link_state_routing_method_triCoord(avail_neigh_routing_sats, dest_satnum, prev_hop_satnum, abort_route)
             #if next_hop_satnum is not None:
             #    if self.neigh_state_dict[next_hop_satnum]['opposing_axis_down'] and next_hop_satnum is not dest_satnum: # Make sure next hop isn't the destination satellite
             #        next_hop_satnum = None # If next hop is opposing axis down (and next hop isn't the destination), don't route to it
@@ -831,26 +845,27 @@ class RoutingSat:
         #  - on status change for one of its direct links
         #  - on status change for a link in a shared motif
         
-        # Update zone routing table
-        self.motif_method_update_zone_routing_table()
+        # Update zone routing table --> Update is being done by distributed_link_state_routing() only during link_state_update_interval
+        #self.motif_method_update_zone_routing_table(avail_neigh_routing_sats)
         
         # get lists of intra_zone_nodes and boundary_nodes
         intra_zone_node_list, boundary_node_list = self.motif_method_get_intra_zone_nodes() # lists contains tuples of (satnum, dist)
         zone_routing_table_satnums = intra_zone_node_list + boundary_node_list
         # if destination is in the same zone, return next hop from zone routing table
         if dest_satnum in zone_routing_table_satnums:
-            #print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} in zone routing table")
-            return self.motif_method_get_next_hop_from_zone_routing_table(dest_satnum)
+            print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} in zone routing table")
+            return self.motif_method_get_next_hop_from_zone_routing_table(avail_neigh_routing_sats, dest_satnum)
         # Otherwise:
+        #print(f"::link_state_motif_method:: satnum {self.satnum} does NOT have dest_satnum {dest_satnum} in zone routing table")
         # If destination is not in the same zone, identify which boundary node is closest to the destination satellite
         min_hop_boundary_satnum = self.motif_method_get_min_hop_boundary_satnum(dest_satnum, boundary_node_list)
-        #print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum}")
+        print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum}")
         if min_hop_boundary_satnum is None: # error in calculating min hop boundary satnum
             return None
         # Identify next hop for target_satnum from zone_routing_table
-        return self.motif_method_get_next_hop_from_zone_routing_table(min_hop_boundary_satnum)
-        #print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum} - next hop is {next_hop}")
-        #return next_hop
+        next_hop = self.motif_method_get_next_hop_from_zone_routing_table(avail_neigh_routing_sats, min_hop_boundary_satnum)
+        print(f"\tsatnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum} - next hop is {next_hop}")
+        return next_hop
         
         
         
@@ -863,7 +878,7 @@ class RoutingSat:
     # Uses list of avail neighbor satellites, the destination satellite satnum, and the previous hop satellite satnum
     # Returns satnum of next hop or None if next hop could not be found
     # Must have neighbor stats updated prior to calling!
-    def link_state_routing_method_triCoord(self, available_neigh_routing_sats, dest_satnum, prev_hop_satnum):
+    def link_state_routing_method_triCoord(self, available_neigh_routing_sats, dest_satnum, prev_hop_satnum, abort_route = False):
         #name = "Distributed Link State TriCoord"
         next_hop_satnum = None
         available_neigh_routing_sats_satnums = []
@@ -873,6 +888,22 @@ class RoutingSat:
             if not self.neigh_state_dict[neigh_routing_sat.sat.model.satnum]['other_connections_avail']: # if neighbor doesn't have any other connections, don't route to it
                 continue
             available_neigh_routing_sats_satnums.append(neigh_routing_sat.sat.model.satnum)
+
+        # do some preliminary logic to see if we even need to conduct routing
+        num_avail_neigh_routing_sats = len(available_neigh_routing_sats_satnums)
+        if num_avail_neigh_routing_sats == 0:
+            print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has no available neighbor routing satellites, returning None")
+            return None
+        elif num_avail_neigh_routing_sats == 1:
+            print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has only one available neighbor routing satellite, returning it (available_neigh_routing_sats_satnums[0])")
+            return available_neigh_routing_sats_satnums[0]
+        elif num_avail_neigh_routing_sats == 2 and prev_hop_satnum in available_neigh_routing_sats_satnums:
+            if available_neigh_routing_sats_satnums[0] == prev_hop_satnum:
+                next_hop = available_neigh_routing_sats_satnums[1]
+            else:
+                next_hop = available_neigh_routing_sats_satnums[0]
+            print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has only two available neighbor routing satellites, returning the one that is not prev_hop_satnum ({next_hop})")
+            return next_hop
        
         # get triCoordinates of current and destination satellites, then calculate the difference for each axis
         curr_A, curr_B, curr_C = tri_coordinates.get_sat_ABC(self.sat.model.satnum)
@@ -886,7 +917,7 @@ class RoutingSat:
         #else:
         #    dest_next_hop = False
         
-        if not prev_hop_satnum is None: # See if we can just send packet along previous axis and direction
+        if prev_hop_satnum is not None and not abort_route: # See if we can just send packet along previous axis and direction
             prev_hop_A, prev_hop_B, prev_hop_C = tri_coordinates.get_sat_ABC(prev_hop_satnum)
             prev_hop_diff_A, prev_hop_diff_B, _ = tri_coordinates.calc_triCoord_dist(curr_A, curr_B, curr_C, prev_hop_A, prev_hop_B, prev_hop_C)
             # Find axis with no change from last hop - that's the axis the packet came in on and is the inferior axis
@@ -1086,7 +1117,7 @@ class RoutingSat:
         
         if prev_hop_satnum in available_neigh_routing_sats_satnums:
             next_hop_satnum = prev_hop_satnum
-            print(f"::link_state_routing_method_triCoord:: Sat {self.sat.model.satnum}: No other available links; Returning packet to previous hop: {prev_hop_satnum}!")
+            print(f"::link_state_routing_method_triCoord:: Sat {self.sat.model.satnum}: No other available links; Returning packet to previous hop: {prev_hop_satnum} (available_neigh_routing_sats_satnums: {available_neigh_routing_sats_satnums})!")
             print(f"\tSat {self.sat.model.satnum} neigh_state_dict: {self.neigh_state_dict}; prev_hop_satnum: {prev_hop_satnum} neigh_state_dict: {get_routing_sat_obj_by_satnum(prev_hop_satnum).neigh_state_dict})")
             return next_hop_satnum
 
@@ -1556,7 +1587,7 @@ class RoutingSat:
         avail_neigh_routing_sat_satnums = []
         for routing_sat in avail_neigh_routing_sats:
             avail_neigh_routing_sat_satnums.append(routing_sat.sat.model.satnum)
-        print(f"::get_list_of_cur_sat_neighbors:: Time Increment: {cur_time_increment}; Sat {self.sat.model.satnum}; avail_neigh_routing_sats: {avail_neigh_routing_sat_satnums}")
+        #print(f"::get_list_of_cur_sat_neighbors:: Time Increment: {cur_time_increment}; Sat {self.sat.model.satnum}; avail_neigh_routing_sats: {avail_neigh_routing_sat_satnums}")
         return avail_neigh_routing_sats
     
     def print_list_of_interface_status(self):
@@ -1662,12 +1693,15 @@ class RoutingSat:
     
     # TODO: COME UP WITH METHOD TO NOT UPDATE TABLE UNLESS NECESSARY
     # TODO:  IDENTIFY WHEN IT WOULD BE NECESSARY TO UPDATE TABLE!
-    def motif_method_update_zone_routing_table(self):
+    def motif_method_update_zone_routing_table(self, avail_neigh_routing_sats):
         # get the list of current neighbors
         # get the neighbors of the neighbors (2 hops)
         
         # build list of neighbor sats to update
-        neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
+        neigh_satnum_list = []
+        for neigh_routing_sat in avail_neigh_routing_sats:
+            neigh_satnum_list.append(neigh_routing_sat.sat.model.satnum)
+        #neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
         
         # clear old zone routing table entries and create temp zone routing table for temp storage
         self.zone_routing_table.clear()
@@ -1788,12 +1822,15 @@ class RoutingSat:
         #print(f"\t::motif_method_get_min_hop_boundary_satnum:: selected min_hop_boundary_satnum: {min_hop_boundary_satnum}")
         return min_hop_boundary_satnum
     
-    def motif_method_get_next_hop_from_zone_routing_table(self, target_satnum):        
+    def motif_method_get_next_hop_from_zone_routing_table(self, avail_neigh_routing_sats, target_satnum):        
         if not target_satnum in self.zone_routing_table.keys():
             print(f"\t::motif_method_get_next_hop_from_zone_routing_table:: ERROR: target_satnum {target_satnum} not in zone_routing_table.  Sat {self.sat.model.satnum} -> ZRT entries: {self.zone_routing_table.keys()}")
             return None
         next_hop_result = self.zone_routing_table[target_satnum]
-        neigh_satnum_list = self.get_list_of_cur_neighbor_satnums() # verify the sat identified in the zone routing table is still an available neighbor (prob unnecessary)
+        neigh_satnum_list = []
+        for neigh_routing_sat in avail_neigh_routing_sats:
+            neigh_satnum_list.append(neigh_routing_sat.sat.model.satnum)
+        #neigh_satnum_list = self.get_list_of_cur_neighbor_satnums() # verify the sat identified in the zone routing table is still an available neighbor (prob unnecessary)
         if type(next_hop_result) is tuple: # target satnum was a neighbor's neighbor, find the neighbor that is still available
             next_hop_pri_satnum, next_hop_alt_satnum = next_hop_result
             if next_hop_pri_satnum in neigh_satnum_list: 
@@ -2872,24 +2909,26 @@ def send_distributed_routing_packet_from_source(src_gs, dest_gs):
     dest_satnum = -1
     for routing_sat in sat_object_list:
         if routing_sat.is_overhead_of(src_gs):
-            sat_overhead_src = True
-            src_routing_sat = routing_sat
+            if not routing_sat.is_disrupted and routing_sat.has_available_connection():
+                sat_overhead_src = True
+                src_routing_sat = routing_sat
         if routing_sat.is_overhead_of(dest_gs):
-            sat_overhead_dest = True
-            dest_satnum = routing_sat.sat.model.satnum
+            if not routing_sat.is_disrupted and routing_sat.has_available_connection():
+                sat_overhead_dest = True
+                dest_satnum = routing_sat.sat.model.satnum
         if sat_overhead_src and sat_overhead_dest:
             break
     if not sat_overhead_src:
-        print(f"No satellite overhead starting terminal {src_gs}", end='\r')
+        print(f"No available satellite overhead starting terminal {src_gs}", end='\r')
         no_sat_overhead_cnt += 1
         return -1
     elif not sat_overhead_dest:
-        print(f"No satellite overhead destination terminal {dest_gs}", end='\r')
+        print(f"No available satellite overhead destination terminal {dest_gs}", end='\r')
         no_sat_overhead_cnt += 1
         return -1
     distance = get_sat_distance(src_gs.at(cur_time), src_routing_sat.sat.at(cur_time))
     #print(f"::send_distributed_routing_packet_from_source():: Sending packet from {src_routing_sat.sat.model.satnum} to {dest_satnum}")
-    packet = {'prev_hop_list': [], 'distance_traveled': distance, 'dest_gs': dest_gs, 'source_gs': src_gs, 'TTL' : packet_start_TTL, 'dest_satnum': dest_satnum}
+    packet = {'prev_hop_list': [], 'distance_traveled': distance, 'dest_gs': dest_gs, 'source_gs': src_gs, 'TTL' : packet_start_TTL, 'dest_satnum': dest_satnum, 'abort_route': False}
     if routing_name == 'Distributed Link State TriCoord':
         src_A, src_B, src_C = tri_coordinates.get_sat_ABC(src_routing_sat.sat.model.satnum)
         dest_A, dest_B, dest_C = tri_coordinates.get_sat_ABC(dest_satnum)
@@ -3365,7 +3404,34 @@ def distributed_link_state_routing():
     
     for _ in range(max_time_inverals):
         print(f"::distributed_link_state_routing::  Time interval: {cur_time_increment} of up to {num_time_intervals}")
-        # 1. Work through packet scheduler at each time interval and send all scheduled packets
+        
+        
+        # 1. Update all neighbor states for current time interval (if on update interval)
+        if cur_time_increment == 0 or cur_time_increment % link_state_update_interval == 0: # if this is the first time increment, or if it is time to advertise link states, then advertise link states
+            print(f"\n<Updating neighbor states> - Time interval: {cur_time_increment} of up to {num_time_intervals}")
+            start = time.process_time()
+            all_sats_update_neigh_state()  # each satellite publishes it's state to it's neighbors and then the satellites process the received data
+            compute_time = time.process_time() - start
+            print(f"Time to compute neighbor states: {compute_time}")
+        
+        # 2. Perform any additional advertisements if necessary (if on update interval)
+        if routing_name == "Distributed Dijkstar Distance" or routing_name == "Distributed Dijkstar Hop":
+            if cur_time_increment == 0 or cur_time_increment % link_state_update_interval == 0: # if this is the first time increment, or if it is time to advertise link states, then advertise link states
+                print("Updating constellation link states")
+                if cur_time_increment == 0:
+                    initial_update = True # if this is the first time increment, keep updating satellite internal constellation dictionaries until all satellites have received all constellation link state updates
+                else:
+                    initial_update = False
+                start = time.process_time()
+                all_sats_update_constellation_link_state_dicts(initial_update)
+                compute_time = time.process_time() - start
+                print(f"Time to update constellation link state dictionaries: {compute_time}")
+        elif routing_name == "Distributed Motif":
+            if cur_time_increment == 0 or cur_time_increment % link_state_update_interval == 0:
+                for routing_sat in sat_object_list:
+                    routing_sat.motif_method_update_zone_routing_table(routing_sat.get_list_of_cur_sat_neighbors())
+
+        # 3. Work through packet scheduler at each time interval and send all scheduled packets
         if cur_time_increment in packet_schedule:
             packet_send_list = packet_schedule[cur_time_increment]
             print(f"::disributed_link_state_routing::  Sending {len(packet_send_list)} scheduled packets from ground terminals")
@@ -3375,25 +3441,6 @@ def distributed_link_state_routing():
                     num_packets_dropped += 1
                 num_packets_sent += 1
             del packet_schedule[cur_time_increment]
-        
-        # 2. Update all neighbor states for current time interval        
-        print(f"\n<Updating neighbor states> - Time interval: {cur_time_increment} of up to {num_time_intervals}")
-        start = time.process_time()
-        all_sats_update_neigh_state()  # each satellite publishes it's state to it's neighbors and then the satellites process the received data
-        compute_time = time.process_time() - start
-        print(f"Time to compute neighbor states: {compute_time}")
-        
-        # 3. Perform any additional advertisements if necessary
-        if routing_name == "Distributed Dijkstar Distance" or routing_name == "Distributed Dijkstar Hop":
-            print("Updating constellation link states")
-            if cur_time_increment == 0:
-                initial_update = True # if this is the first time increment, keep updating satellite internal constellation dictionaries until all satellites have received all constellation link state updates
-            else:
-                initial_update = False
-            start = time.process_time()
-            all_sats_update_constellation_link_state_dicts(initial_update)
-            compute_time = time.process_time() - start
-            print(f"Time to update constellation link state dictionaries: {compute_time}")
 
         # 4. Keep sending packets until no more packets are sent (either nothing to sent, or sats have hit their bandwidth limit)
         print("Checking for packets to send")
@@ -4132,6 +4179,7 @@ def print_configured_options():
     string += f"  Routing method: {routing_name}\n"
     string += f"  Interval between time increments: {time_interval} seconds\n"
     string += f"  Number of time increments: {num_time_intervals}\n"
+    string += f"  Number of time increments between link state updates: {link_state_update_interval}\n"
     string += f"  Packets generated per interval: {packets_generated_per_interval}\n"
     string += f"  Do QoS: {do_qos}\n"
     string += f"  Starting packet TTL: {packet_start_TTL}\n"
@@ -4172,9 +4220,9 @@ def print_help(options, long_options, option_explanation):
 # parse command line arguments and set global variables as appropriate
 def parse_command_line_arguments():
     argumentList = sys.argv[1:]
-    options = "hmut:pr:i:n:odasc:k:ql:x:v:z:"
-    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "disruption_schedule_method=", "max_disruptions_per_interval", "csv_output=", "disruption_option_string="]
-    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify disruption scheduling method", "specify max number of disruptions per time interval", "specify csv output file name", "specify disruption option string for methods that require it ('type,percent,duration,numIntervals')"]
+    options = "hmut:pr:i:n:odasc:k:ql:x:v:z:e:"
+    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "disruption_schedule_method=", "max_disruptions_per_interval", "csv_output=", "disruption_option_string=", "update_interval="]
+    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify disruption scheduling method", "specify max number of disruptions per time interval", "specify csv output file name", "specify disruption option string for methods that require it ('type,percent,duration,numIntervals')", "specify number of time increments before updating link states"]
     try:
         arguments, values = getopt.getopt(argumentList, options, long_options)
     except getopt.error as err:
@@ -4238,6 +4286,9 @@ def parse_command_line_arguments():
         elif currentArgument in ("-z", "--disruption_options_string"):
             global disruption_options_string
             disruption_options_string = currentValue
+        elif currentArgument in ("-e", "--update_interval"):
+            global link_state_update_interval
+            link_state_update_interval = int(currentValue)
 
 # ::::::: MAIN :::::::
 def main ():
