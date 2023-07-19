@@ -868,12 +868,12 @@ class RoutingSat:
         next_hop_satnum = None
         available_neigh_routing_sats_satnums = []
         for neigh_routing_sat in available_neigh_routing_sats:
+            if neigh_routing_sat.sat.model.satnum == dest_satnum: # Is destination satellite an available neighbor?
+                return dest_satnum
+            if not self.neigh_state_dict[neigh_routing_sat.sat.model.satnum]['other_connections_avail']: # if neighbor doesn't have any other connections, don't route to it
+                continue
             available_neigh_routing_sats_satnums.append(neigh_routing_sat.sat.model.satnum)
-
-        if dest_satnum in available_neigh_routing_sats_satnums: # Is destination satellite a neighbor?
-            next_hop_satnum = dest_satnum
-            return next_hop_satnum
-        
+       
         # get triCoordinates of current and destination satellites, then calculate the difference for each axis
         curr_A, curr_B, curr_C = tri_coordinates.get_sat_ABC(self.sat.model.satnum)
         dest_A, dest_B, dest_C = tri_coordinates.get_sat_ABC(dest_satnum)
@@ -1013,21 +1013,21 @@ class RoutingSat:
         # value tests to identify the logical direction of each neighbor
         # Will use compass directions of logical map for reference names
         neigh_axes_dict = {}
-        for neigh_routing_sat in available_neigh_routing_sats:
-            neigh_A, neigh_B, neigh_C = tri_coordinates.get_sat_ABC(neigh_routing_sat.sat.model.satnum)
+        for neigh_routing_sat_satnum in available_neigh_routing_sats_satnums:
+            neigh_A, neigh_B, neigh_C = tri_coordinates.get_sat_ABC(neigh_routing_sat_satnum)
             A_diff, B_diff, C_diff = tri_coordinates.calc_triCoord_dist(curr_A, curr_B, curr_C, neigh_A, neigh_B, neigh_C)
             if (A_diff == 0) and (B_diff == -1) and (C_diff == 1):
-                neigh_axes_dict['logical_N'] = neigh_routing_sat.sat.model.satnum
+                neigh_axes_dict['logical_N'] = neigh_routing_sat_satnum
             elif (A_diff == 0) and (B_diff == 1) and (C_diff == -1):
-                neigh_axes_dict['logical_S'] = neigh_routing_sat.sat.model.satnum
+                neigh_axes_dict['logical_S'] = neigh_routing_sat_satnum
             elif (A_diff == 1) and (B_diff == 0) and (C_diff == 1):
-                neigh_axes_dict['logical_NE'] = neigh_routing_sat.sat.model.satnum
+                neigh_axes_dict['logical_NE'] = neigh_routing_sat_satnum
             elif (A_diff == 1) and (B_diff == 1) and (C_diff == 0):
-                neigh_axes_dict['logical_SE'] = neigh_routing_sat.sat.model.satnum
+                neigh_axes_dict['logical_SE'] = neigh_routing_sat_satnum
             elif (A_diff == -1) and (B_diff == 0) and (C_diff == -1):
-                neigh_axes_dict['logical_SW'] = neigh_routing_sat.sat.model.satnum
+                neigh_axes_dict['logical_SW'] = neigh_routing_sat_satnum
             elif (A_diff == -1) and (B_diff == -1) and (C_diff == 0):
-                neigh_axes_dict['logical_NW'] = neigh_routing_sat.sat.model.satnum
+                neigh_axes_dict['logical_NW'] = neigh_routing_sat_satnum
             else:
                 print(f"::link_state_routing_method_triCoord:: Unexpected neighbor coordinates!\n\tCurrent satnum: {self.sat.model.satnum} ({curr_A},{curr_B},{curr_C}), Neighbor satnum: {neigh_routing_sat.sat.model.satnum} ({neigh_A},{neigh_B},{neigh_C})\n\tdiff: ({A_diff},{B_diff},{C_diff})")
                 return None
@@ -1040,7 +1040,7 @@ class RoutingSat:
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(major_axis, major_direction, inferior_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
-            if next_hop_satnum != prev_hop_satnum and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
+            if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 #print(f"\t::link_state_routing_method_triCoord:: Priority 1 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
 
@@ -1048,7 +1048,7 @@ class RoutingSat:
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(major_axis, major_direction, minor_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
-            if next_hop_satnum != prev_hop_satnum and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
+            if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 #print(f"\t::link_state_routing_method_triCoord:: Priority 2 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
         
@@ -1056,7 +1056,7 @@ class RoutingSat:
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(minor_axis, minor_direction, inferior_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
-            if next_hop_satnum != prev_hop_satnum and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
+            if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: Priority 3 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
 
@@ -1064,7 +1064,7 @@ class RoutingSat:
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(inferior_axis, inferior_direction, minor_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
-            if next_hop_satnum != prev_hop_satnum and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
+            if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: Priority 4 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
 
@@ -1072,7 +1072,7 @@ class RoutingSat:
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(minor_axis, minor_direction, major_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
-            if next_hop_satnum != prev_hop_satnum and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
+            if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: Priority 5 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
 
@@ -1080,7 +1080,7 @@ class RoutingSat:
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(inferior_axis, inferior_direction, major_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
-            if next_hop_satnum != prev_hop_satnum and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
+            if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"Priority 6 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
                 return next_hop_satnum
         
@@ -1094,6 +1094,9 @@ class RoutingSat:
         print(f"\tneigh_axes_dict: {neigh_axes_dict}\n\tLength available_neigh_routing_sats: {len(available_neigh_routing_sats)}")
         for neigh_sat in available_neigh_routing_sats:
             print(f"\t{neigh_sat.sat.model.satnum}")
+        print(f"\tLength of available_neigh_routing_sats_satnums: {len(available_neigh_routing_sats_satnums)}")
+        for neigh_sat_satnum in available_neigh_routing_sats_satnums:
+            print(f"\t{neigh_sat_satnum}")
         return None
         # This packet should be rolled over to the next time interval...
 
@@ -1478,10 +1481,15 @@ class RoutingSat:
                 if not self.fore_starboard_int_up or self.fore_starboard_sat_satnum is None:
                     opposing_axis_down = True
 
+            if len(neigh_routing_sat_list) < 2:
+                other_conn_avail = False
+            else:
+                other_conn_avail = True
+
             # now update the current satellite's state in the neighbor's neigh_state_dict - this simulates sending a report and the nieghbor receiving it for processing
             if not self.sat.model.satnum in neigh_routing_sat.neigh_state_dict:  
                 # first entry into this neigh_state_dict, so initialize all the link state variables for this sat
-                neigh_routing_sat.neigh_state_dict[self.sat.model.satnum] = {'interface_name': interface, 'connection_up': True, 'last_recv_status': cur_time, 'connection_last_down': None, 'is_congested': congestion_status, 'has_neigh_connection_down' : neigh_connection_down, 'has_neigh_congested' : neigh_congested, 'opposing_axis_down': opposing_axis_down}
+                neigh_routing_sat.neigh_state_dict[self.sat.model.satnum] = {'interface_name': interface, 'connection_up': True, 'last_recv_status': cur_time, 'connection_last_down': None, 'is_congested': congestion_status, 'has_neigh_connection_down' : neigh_connection_down, 'has_neigh_congested' : neigh_congested, 'opposing_axis_down': opposing_axis_down, 'other_connections_avail': other_conn_avail}
             else:  # prev entry exists, so update relavent values
                 neigh_routing_sat.neigh_state_dict[self.sat.model.satnum]['interface_name'] = interface
                 neigh_routing_sat.neigh_state_dict[self.sat.model.satnum]['last_recv_status'] = cur_time
@@ -1489,6 +1497,7 @@ class RoutingSat:
                 neigh_routing_sat.neigh_state_dict[self.sat.model.satnum]['has_neigh_connection_down'] = neigh_connection_down
                 neigh_routing_sat.neigh_state_dict[self.sat.model.satnum]['has_neigh_congested'] = neigh_congested
                 neigh_routing_sat.neigh_state_dict[self.sat.model.satnum]['opposing_axis_down'] = opposing_axis_down
+                neigh_routing_sat.neigh_state_dict[self.sat.model.satnum]['other_connections_avail'] = other_conn_avail
 
     def update_neigh_state_table(self):
         if self.is_disrupted: # if this sat is disrupted, don't update internal link status
