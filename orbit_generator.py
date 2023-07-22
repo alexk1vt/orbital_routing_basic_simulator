@@ -895,7 +895,7 @@ class RoutingSat:
             print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has no available neighbor routing satellites, returning None")
             return None
         elif num_avail_neigh_routing_sats == 1:
-            print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has only one available neighbor routing satellite, returning it (available_neigh_routing_sats_satnums[0])")
+            print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has only one available neighbor routing satellite, returning it ({available_neigh_routing_sats_satnums[0]})")
             return available_neigh_routing_sats_satnums[0]
         elif num_avail_neigh_routing_sats == 2 and prev_hop_satnum in available_neigh_routing_sats_satnums:
             if available_neigh_routing_sats_satnums[0] == prev_hop_satnum:
