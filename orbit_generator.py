@@ -231,8 +231,8 @@ Puerto_Villamil = wgs84.latlon(0.9333 * S, 90.9500 * W) # Disruption location
 Tres_Lagos = wgs84.latlon(50.3333 * S, 72.2667 * W) # Disruption location
 Shelby = wgs84.latlon(48.5000 * N, 111.8500 * W) # Disruption location
 Great_Falls = wgs84.latlon(47.5000 * N, 111.3000 * W) # Disruption location
-Glasgow = wgs84.latlon(48.2000 * N, 106.6333 * W) # Disruption location
-Reims = wgs84.latlon(49.2500 * N, 4.0333 * E) # Disruption location
+Glasgow = wgs84.latlon(48.2000 * N, 106.6333 * W) # Disruption location *EW_high_latitude
+Reims = wgs84.latlon(49.2500 * N, 4.0333 * E) # Disruption location *EW_high_latitude
 
 class RoutingSat:
     def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _succeeding_orbit_number, _preceeding_orbit_number, _fore_sat_index, _aft_sat_index):
@@ -753,29 +753,6 @@ class RoutingSat:
     # calculates satnum of next hop or None if no next hop satellite is available
     def find_next_link_state_hop(self, avail_neigh_routing_sats, dest_gs, dest_satnum, prev_hop_satnum, abort_route = False):
         global routing_name
-        # update current neighboring satellites on each interface
-        #self.update_current_neighbor_sats()
-        
-        #avail_neigh_routing_sats = self.get_list_of_cur_sat_neighbors()
-        """
-        avail_neigh_routing_sats = []
-        if self.fore_int_up and ((self.fore_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_sat_satnum])
-        if self.aft_int_up and ((self.aft_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_sat_satnum])
-        if self.port_int_up and (not self.port_sat_satnum is None) and ((self.port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.port_sat_satnum])
-        if self.starboard_int_up and (not self.starboard_sat_satnum is None) and ((self.starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.starboard_sat_satnum])
-        if self.fore_port_int_up and (not self.fore_port_sat_satnum is None) and ((self.fore_port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_port_sat_satnum])
-        if self.fore_starboard_int_up and (not self.fore_starboard_sat_satnum is None) and ((self.fore_starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_starboard_sat_satnum])
-        if self.aft_port_int_up and (not self.aft_port_sat_satnum is None) and ((self.aft_port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_port_sat_satnum])
-        if self.aft_starboard_int_up and (not self.aft_starboard_sat_satnum is None) and ((self.aft_starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_starboard_sat_satnum])
-        """
 
         if len(avail_neigh_routing_sats) == 0:
             print(f"::find_next_link_state_hop:: Sat {self.sat.model.satnum}:  No available neighboring satellites to route to! (received packet from sat {prev_hop_satnum})")
