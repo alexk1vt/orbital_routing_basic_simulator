@@ -211,8 +211,10 @@ Nairobi = wgs84.latlon(1.2921 * S, 36.8219 * E) # Extra
 Rio_Gallegos = wgs84.latlon(51.6230 * S, 69.2168 * W) # Extra
 Calgary = wgs84.latlon(51.0486 * N, 114.0708 * W) # Extra
 Ottawa = wgs84.latlon(45.4215 * N, 75.6972 * W) # Extra
-Seattle = wgs84.latlon(47.6062 * N, 122.3321 * W) # Extra
-Krakow = wgs84.latlon(50.0647 * N, 19.9450 * E) # Extra
+Seattle = wgs84.latlon(47.6062 * N, 122.3321 * W) # Extra EW_high_latitude
+Krakow = wgs84.latlon(50.0647 * N, 19.9450 * E) # Extra EW_high_latitude
+Pontianak = wgs84.latlon(0.0222 * S, 109.3300 * E) # Extra EW_equator
+Kapenguria = wgs84.latlon(1.2414 * N, 35.1117 * E) # Extra EW_equator
 Kunahandhoo = wgs84.latlon(1.7843 * N, 73.3692 * E) # Disruption location
 Burgabo = wgs84.latlon(1.2183 * S, 41.8379 * E) # Disruption location
 Bura = wgs84.latlon(3.4501 * S, 39.0836 * E) # Disruption location
@@ -231,8 +233,10 @@ Puerto_Villamil = wgs84.latlon(0.9333 * S, 90.9500 * W) # Disruption location
 Tres_Lagos = wgs84.latlon(50.3333 * S, 72.2667 * W) # Disruption location
 Shelby = wgs84.latlon(48.5000 * N, 111.8500 * W) # Disruption location
 Great_Falls = wgs84.latlon(47.5000 * N, 111.3000 * W) # Disruption location
-Glasgow = wgs84.latlon(48.2000 * N, 106.6333 * W) # Disruption location
-Reims = wgs84.latlon(49.2500 * N, 4.0333 * E) # Disruption location
+Glasgow = wgs84.latlon(48.2000 * N, 106.6333 * W) # Disruption location EW_high_latitude disruption
+Reims = wgs84.latlon(49.2500 * N, 4.0333 * E) # Disruption location EW_high_latitude disruption
+Bukittinggi = wgs84.latlon(0.3000 * S, 100.3667 * E) # Disruption location EW_equator disruption
+Baraawe = wgs84.latlon(1.1167 * N, 44.0500 * E) # Disruption location EW_equator disruption
 
 class RoutingSat:
     def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _succeeding_orbit_number, _preceeding_orbit_number, _fore_sat_index, _aft_sat_index):
@@ -3837,7 +3841,7 @@ def load_disruption_schedule_from_file():
 
 def build_EW_equator_packet_schedule():
     # Using Kuala Lumpur and Nairobi
-    city_list = [Kuala_Lumpur, Nairobi]
+    city_list = [Pontianak, Kapenguria]
     build_2_city_packet_schedule(city_list)
 
 def build_EW_high_latitude_packet_schedule():
