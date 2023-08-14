@@ -400,7 +400,11 @@ class RoutingSat:
                         prev_hop = packet['prev_hop_list'][-1]
                         if 'abort_route' in packet and packet['abort_route'] == True:
                             abort_route = True
-                    target_satnum = self.find_next_link_state_hop(avail_neigh_routing_sats, packet['dest_gs'], packet['dest_satnum'], prev_hop, abort_route) # find_next_link_state_hop() is function that performs routing selection
+                    target_satnum, set_abort_route = self.find_next_link_state_hop(avail_neigh_routing_sats, packet['dest_gs'], packet['dest_satnum'], prev_hop, abort_route) # find_next_link_state_hop() is function that performs routing selection
+                    if set_abort_route:
+                        packet['abort_route'] = True
+                    else:
+                        packet['abort_route'] = False
                 if target_satnum is None:
                     print(f"\t::distributed_routing_link_state_process_packet_queue:: satellite {self.sat.model.satnum} - could not find next hop for packet.  Rolling packet to next time increment (current TTL: {packet['TTL']}).")
                     self.rollover_packet_qu.insert(0, packet) # no next hop found; put packet in rollover queue for next time interval
@@ -787,8 +791,16 @@ class RoutingSat:
             return None
         
         next_hop_satnum = None
+        set_abort_route = False
         if routing_name == "Distributed Link State TriCoord":
-            next_hop_satnum = self.link_state_routing_method_triCoord(avail_neigh_routing_sats, dest_satnum, prev_hop_satnum, abort_route)
+            result = self.link_state_routing_method_triCoord(avail_neigh_routing_sats, dest_satnum, prev_hop_satnum, abort_route)
+            if type(result) is int:
+                next_hop_satnum = result
+            elif type(result) is tuple:
+                next_hop_satnum, poor_route = result
+                if poor_route:
+                    set_abort_route = True
+                
             #if next_hop_satnum is not None:
             #    if self.neigh_state_dict[next_hop_satnum]['opposing_axis_down'] and next_hop_satnum is not dest_satnum: # Make sure next hop isn't the destination satellite
             #        next_hop_satnum = None # If next hop is opposing axis down (and next hop isn't the destination), don't route to it
@@ -815,7 +827,7 @@ class RoutingSat:
         elif next_hop_satnum is self.sat.model.satnum:
             print(f"::find_next_link_state_hop:: next_hop_satnum: {next_hop_satnum} is the same as the current satellite; returning 'None' - current time increment: {cur_time_increment}")
             next_hop_satnum = None
-        return next_hop_satnum
+        return next_hop_satnum, set_abort_route
         
         
     # This method is implemented from the paper: Self-Headling Motif-Based Distributed Routing Algorithm for Mega-Constellation
@@ -940,7 +952,7 @@ class RoutingSat:
                     axis_change_needed = True
                 #inferior_axis = 'C' 
             
-        
+            axis_change_needed = True # for now, always change axis
             if not axis_change_needed: # continue sending packet along current axis unless the target axis is down at the neighbor
                 #print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has prev_hop_satnum {prev_hop_satnum} - sending packet along same axis")
                 if (prev_hop_satnum == self.fore_sat_satnum) and (not self.aft_sat_satnum is None):
@@ -969,10 +981,11 @@ class RoutingSat:
                             next_hop_satnum = self.fore_port_sat_satnum
                 if next_hop_satnum is not None and next_hop_satnum in available_neigh_routing_sats_satnums:
                     return next_hop_satnum
-                #print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} could not send packet along same axis; trying other axes")
-            #else:
-                #print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has prev_hop_satnum {prev_hop_satnum} - axis change needed")
+                print(f"::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} could not send packet along same axis; finding new axis")
+            else:
+                print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has prev_hop_satnum {prev_hop_satnum} - axis change needed")
         
+
         # Need to identify new axis to send packet
         diff_list = [abs(A_diff), abs(B_diff), abs(C_diff)]
         axis_list = ['A', 'B', 'C']
@@ -1071,59 +1084,62 @@ class RoutingSat:
         # Available logical directions identified, along with associated satnums
         # Select highest available priority route that does not return packet to previous hop
         
+        poor_route = False
+
         # Priority 1: Reduce major_axis along inferior_axis
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(major_axis, major_direction, inferior_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
-                #print(f"\t::link_state_routing_method_triCoord:: Priority 1 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
-                return next_hop_satnum
+                #print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 1 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                return next_hop_satnum, poor_route
 
         # Priority 2: Reduce major_axis along minor_axis
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(major_axis, major_direction, minor_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
-                #print(f"\t::link_state_routing_method_triCoord:: Priority 2 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
-                return next_hop_satnum
+                #print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 2 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                return next_hop_satnum, poor_route
         
         # Priority 3: Reduce minor_axis along inferior_axis    
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(minor_axis, minor_direction, inferior_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
-                print(f"\t::link_state_routing_method_triCoord:: Priority 3 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
-                return next_hop_satnum
-
+                print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 3 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                return next_hop_satnum, poor_route
+            
+        poor_route = True # True indicates that this is poor axis and shouldn't be followed by next hop unless necessary
         # Priority 4: Reduce inferior_axis along minor_axis
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(inferior_axis, inferior_direction, minor_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
-                print(f"\t::link_state_routing_method_triCoord:: Priority 4 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
-                return next_hop_satnum
+                print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 4 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                return next_hop_satnum, poor_route 
 
         # Priority 5: Reduce minor_axis along major_axis
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(minor_axis, minor_direction, major_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
-                print(f"\t::link_state_routing_method_triCoord:: Priority 5 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
-                return next_hop_satnum
+                print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 5 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                return next_hop_satnum, poor_route 
 
         # Priority 6: Reduce inferior_axis along major_axis
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(inferior_axis, inferior_direction, major_axis)
         if priority_direction in neigh_axes_dict:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
-                print(f"Priority 6 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
-                return next_hop_satnum
+                print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 6 direction: {priority_direction}, next hop satnum: {next_hop_satnum}")
+                return next_hop_satnum, poor_route 
         
         if prev_hop_satnum in available_neigh_routing_sats_satnums:
             next_hop_satnum = prev_hop_satnum
             print(f"::link_state_routing_method_triCoord:: Sat {self.sat.model.satnum}: No other available links; Returning packet to previous hop: {prev_hop_satnum} (available_neigh_routing_sats_satnums: {available_neigh_routing_sats_satnums})!")
             print(f"\tSat {self.sat.model.satnum} neigh_state_dict: {self.neigh_state_dict}; prev_hop_satnum: {prev_hop_satnum} neigh_state_dict: {get_routing_sat_obj_by_satnum(prev_hop_satnum).neigh_state_dict})")
-            return next_hop_satnum
+            return next_hop_satnum, poor_route
 
         print(f"::link_state_routing_method_triCoord:: Sat {self.sat.model.satnum}: Unable to find next hop!")
         print(f"\tneigh_axes_dict: {neigh_axes_dict}\n\tLength available_neigh_routing_sats: {len(available_neigh_routing_sats)}")
