@@ -1,5 +1,14 @@
+import os
 import subprocess
+import platform
 from datetime import datetime
+
+systemOS = platform.system()
+if systemOS == 'Linux':
+    python = "python3"
+elif systemOS == 'Windows':
+    python = "python"
+print(f"System OS is {systemOS}; using python command: {python}")
 
 # Available arguments
 specify_routing_method_arg = "-r"
@@ -33,10 +42,10 @@ DistMotif_routing_method = "Distributed Motif"
 type_I_disruption_schedule = "type_I"
 
 # WHICH RUNS TO DO
-#run_list = [1]
+run_list = [1]
 #run_list = [1,2,3]
 #run_list = [4,5,6]
-run_list = [10]
+#run_list = [10]
 # 1: TriCoord, no disruptions
 # 2: TriCoord, disruptions, Reims, 25
 # 3: TriCoord, disruptions, Reims, 75
@@ -54,11 +63,19 @@ routing_method_arg = TriCoord_routing_method
 packet_schedule_arg = EW_high_latitude_packet
 interval_arg = "60" # Simulator updates every 1 minute
 update_interval_arg = "60" # Satellites update each other every 1 minute
-num_increments_arg = "1200" # 20 hours
-num_packets_per_interval_arg = "100"
+num_increments_arg = "120" # 20 hours
+num_packets_per_interval_arg = "10"
 
 # Output path
-output_path = "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\outputs\\"
+if systemOS == 'Linux':
+    path = "/home/alex/repos/orbital_routing_basic_simulator/"
+    output_path = path + "outputs/"
+elif systemOS == 'Windows':
+    path = "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\"
+    output_path = path + "outputs\\"
+
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
 
 # CSV output argument
 csv_path = output_path
@@ -76,13 +93,13 @@ if 1 not in run_list:
     print("  Skipping this run")
 else:
     print("  Running the simulator with the following arguments:")
-    print(f"  python orbit_generator.py {specify_routing_method_arg} {routing_method_arg} {specify_packet_schedule_arg} {packet_schedule_arg} {specify_interval_arg} {interval_arg} {specify_update_interval_arg} {update_interval_arg} {specify_num_increments_arg} {num_increments_arg} {specify_num_packets_per_interval_arg} {num_packets_per_interval_arg} {specify_csv_output_arg} {csv_output_arg}")
+    print(f"  {python} orbit_generator.py {specify_routing_method_arg} {routing_method_arg} {specify_packet_schedule_arg} {packet_schedule_arg} {specify_interval_arg} {interval_arg} {specify_update_interval_arg} {update_interval_arg} {specify_num_increments_arg} {num_increments_arg} {specify_num_packets_per_interval_arg} {num_packets_per_interval_arg} {specify_csv_output_arg} {csv_output_arg}")
     print(f"  Std output will be saved to {std_output_path}")
     print(f"  Start time is: {datetime.now().time()}")
     # Run the simulator
     # no disruptions
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, path +"orbit_generator.py",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -129,7 +146,7 @@ else:
     print(f"  Start time is: {datetime.now().time()}")
     # Run the simulator (with disruptions)
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -175,7 +192,7 @@ else:
     print(f"  Start time is: {datetime.now().time()}")
     # Run the simulator (with disruptions)
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -216,7 +233,7 @@ else:
     # Run the simulator
     # no disruptions
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -263,7 +280,7 @@ else:
     print(f"  Start time is: {datetime.now().time()}")
     # Run the simulator (with disruptions)
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -310,7 +327,7 @@ else:
     print(f"  Start time is: {datetime.now().time()}")
     # Run the simulator (with disruptions)
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -351,7 +368,7 @@ else:
     # Run the simulator
     # no disruptions
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -398,7 +415,7 @@ else:
     print(f"  Start time is: {datetime.now().time()}")
     # Run the simulator (with disruptions)
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -445,7 +462,7 @@ else:
     print(f"  Start time is: {datetime.now().time()}")
     # Run the simulator (with disruptions)
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
@@ -496,7 +513,7 @@ else:
     # Run the simulator
     # no disruptions
     with open (std_output_path, "w") as f:
-        subprocess.run(["python", "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+        subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
                         specify_routing_method_arg, routing_method_arg, 
                         specify_packet_schedule_arg, packet_schedule_arg,
                         specify_interval_arg, interval_arg,
