@@ -44,32 +44,11 @@ DistNaiveBasic_routing_method = "Distributed Naive Basic"
 no_disruption_schedule = None
 type_I_disruption_schedule = "type_I"
 
-# WHICH RUNS TO DO
-run_list = [1, 4, 7, 11, 14] # No disruption scenarios for all routing types
-#run_list = [1,2,3] # TriCoord
-#run_list = [4,5,6] # Dist Motif
-#run_list = [7,8,9] # Dist Dijkstar Hop
-#run_list = [11,12,13] # Dist Coin Toss
-#run_list = [14,15,16] # Dist Naive Basic
-#run_list = [10] # Experimental
-
-# 1: TriCoord, no disruptions
-# 2: TriCoord, disruptions, Reims, 25
-# 3: TriCoord, disruptions, Reims, 75
-# 4: DistDijkstarHop, no disruptions
-# 5: DistDijkstarHop, disruptions, Reims, 25
-# 6: DistDijkstarHop, disruptions, Reims, 75
-
-# FIRST RUN
-#  TriCoord
-#  EW_equator
-#  No Disruptions
-
 # Standard sim arguments
 interval_arg = "60" # Simulator updates every 1 minute
 update_interval_arg = "2" # Satellites update every 2 minutes
-num_increments_arg = "2" #"60" # 1 hour
-num_packets_per_interval_arg = "1"#"10"
+num_increments_arg = "60" # 1 hour
+num_packets_per_interval_arg = "4"#"10"
 
 # Disruption arguments (static)
 disruption_schedule_arg = type_I_disruption_schedule
@@ -78,9 +57,9 @@ disruption_option_end = "3"#"600" # 10 hours
 disruption_option_overhead_angle = "30"
 
 # Disruption arguments (dynamic)
-routing_method_list = [DistNaiveBasic_routing_method]
+routing_method_list = [DistNaiveBasic_routing_method, DistCoinFlip_routing_method, TriCoord_routing_method, DistDijkstarHop_routing_method, DistMotif_routing_method]
 packet_schedule_list = [EW_high_latitude_packet]
-disruption_schedule_list = [no_disruption_schedule, type_I_disruption_schedule]
+disruption_schedule_list = [no_disruption_schedule] #[no_disruption_schedule, type_I_disruption_schedule]
 disruption_location_list = ["Reims"]
 disruption_intensity_list = ["25", "75"]
 
@@ -181,6 +160,9 @@ for routing_method_arg in routing_method_list:
                         print(f"\tDisruption Schedule: {disruption_schedule_arg}")
                         print(f"\tDisruption Location: {disruption_option_location}")
                         print(f"\tDisruption Intensity: {disruption_option_intensity}")
+                        print(f"\tDisruption Start Interval: {disruption_option_start}")
+                        print(f"\tDisruption End Interval: {disruption_option_end}")
+                        print(f"\tDisruption Overhead Angle: {disruption_option_overhead_angle}")
                         print("  Running the simulator with the following arguments:")
                         # disruptions
                         print(f"  {python} orbit_generator.py {specify_routing_method_arg} {routing_method_arg} {specify_packet_schedule_arg} {packet_schedule_arg} {specify_interval_arg} {interval_arg} {specify_update_interval_arg} {update_interval_arg} {specify_num_increments_arg} {num_increments_arg} {specify_num_packets_per_interval_arg} {num_packets_per_interval_arg} {do_disruptions_arg} {specify_disruption_schedule_arg} {disruption_schedule_arg} {specify_disruption_option_arg} {disruption_option_arg} {specify_csv_output_arg} {csv_output_arg}")
