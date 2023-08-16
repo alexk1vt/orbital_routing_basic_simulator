@@ -37,6 +37,8 @@ NS_new_world_packet = "NS_new_world"
 TriCoord_routing_method = "Distributed Link State TriCoord"
 DistDijkstarHop_routing_method = "Distributed Dijkstar Hop"
 DistMotif_routing_method = "Distributed Motif"
+DistCoinFlip_routing_method = "Distributed Coin Flip"
+DistNaiveBasic_routing_method = "Distributed Naive Basic"
 
 # disruption schedule arguments
 type_I_disruption_schedule = "type_I"
