@@ -63,7 +63,7 @@ routing_method_arg = TriCoord_routing_method
 packet_schedule_arg = EW_high_latitude_packet
 interval_arg = "60" # Simulator updates every 1 minute
 update_interval_arg = "60" # Satellites update each other every 1 minute
-num_increments_arg = "120" # 20 hours
+num_increments_arg = "2" # 20 hours
 num_packets_per_interval_arg = "10"
 
 # Output path

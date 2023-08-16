@@ -45,8 +45,8 @@ do_qos = False # QoS things like congestion control
 packet_schedule_method = "static" # "random", "alt_random", "static", "file"
 packet_schedule_method_options = ["random", "alt_random", "static", "file", "EW_equator", "EW_high_latitude", "NS_old_world", "NS_new_world"]
 test_point_to_point = False # routes repeatedly between two static locations over specified time intervals -- MUST BE SET FOR 'STATIC' PACKET SCHEDULE METHOD
-routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif"
-routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Directed Dijkstar Hop", "Directed Dijkstar Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif"]
+routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif", "Distributed Coin Flip"
+routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Directed Dijkstar Hop", "Directed Dijkstar Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif", "Distributed Coin Flip", "Distributed Naive Basic"]
 testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time", "Dump Packet Schedule to File", "Load Packet Schedule From File", "Dump Disruption Schedule to File", "Load Disruption Schedule From File"]
 csv_output = None
 
@@ -813,6 +813,10 @@ class RoutingSat:
             next_hop_satnum = self.link_state_routing_method_dijkstar(dest_satnum, use_dist=False)
         elif routing_name == "Distributed Motif":
             next_hop_satnum = self.link_state_motif_method(avail_neigh_routing_sats, dest_satnum)
+        elif routing_name == "Distributed Coin Flip":
+            next_hop_satnum = self.distributed_coin_flip_route (avail_neigh_routing_sats, dest_satnum)
+        elif routing_name == "Distributed Naive Basic":
+            next_hop_satnum = self.distributed_naive_route (avail_neigh_routing_sats, dest_satnum)
         else:
             print(f"::find_next_link_state_hop:: No known routing name specified.  routing_name: {routing_name}")
 
@@ -883,10 +887,173 @@ class RoutingSat:
         print(f"\tsatnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum} - next hop is {next_hop}")
         return next_hop
         
-        
-        
+    def distributed_disCoRoute (self, available_neigh_routing_sats, dest_satnum):
+        #name = "Distributed DisCoRoute"
+        return
+    
+    # Identifies the minimum number of intra-orbit hops (East-Wes)t based on orbit number and
+    # the minimum number of inter-orbit hops (North-South (relatively)) based on orbit index number
+    # Randomly selects one of the two paths, so long as there are hops remaining on that path
+    def distributed_coin_flip_route (self, available_neigh_routing_sats, dest_satnum):
+        #name = ""Distributed Coin Flip""
+                
+        # Get available neighbors
+        inter_orbit_pos_satnum = None
+        inter_orbit_neg_satnum = None
+        intra_orbit_pos_satnum = None
+        intra_orbit_neg_satnum = None
+        for neigh_routing_sat in available_neigh_routing_sats:
+            if neigh_routing_sat.orbit_number == self.orbit_number: # same orbit, so intra-orbit
+                if neigh_routing_sat.sat_index == (self.sat_index + 1)%sats_per_orbit:
+                    intra_orbit_pos_satnum = neigh_routing_sat.sat.model.satnum
+                elif neigh_routing_sat.sat_index == (self.sat_index - 1)%sats_per_orbit:
+                    intra_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
+            else:                                                   # different orbit, so inter-orbit      
+                if neigh_routing_sat.orbit_number == (self.orbit_number + 1)%orbit_cnt:
+                    if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
+                        inter_orbit_pos_satnum = neigh_routing_sat.sat.model.satnum
+                elif neigh_routing_sat.orbit_number == (self.orbit_number - 1)%orbit_cnt:
+                    if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
+                        inter_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
+                
+        (inter_orbit_hop_count, inter_orbit_direction_positive), (intra_orbit_hop_count, intra_orbit_direction_positive) = get_inter_intra_min_hop_count (self.sat.model.satnum, dest_satnum)
+        if not inter_orbit_direction_positive:
+            inter_orbit_symbol = '+'
+        else:
+            inter_orbit_symbol = '-'
+        if not intra_orbit_direction_positive:
+            intra_orbit_symbol = '+'
+        else:
+            intra_orbit_symbol = '-'
 
+        print(f"::distributed_coin_flip_route:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) has inter_orbit_hop_count {inter_orbit_symbol}{inter_orbit_hop_count} and intra_orbit_hop_count {intra_orbit_symbol}{intra_orbit_hop_count} to destination satnum {dest_satnum} (orbit {get_routing_sat_obj_by_satnum (dest_satnum).orbit_number}, index {get_routing_sat_obj_by_satnum (dest_satnum).sat_index})")
 
+        inter_orbit_choice_avail = False
+        intra_orbit_choice_avail = False
+        if inter_orbit_hop_count > 0:
+            if inter_orbit_direction_positive and (inter_orbit_pos_satnum is not None):
+                inter_orbit_choice_avail = True
+            elif (not inter_orbit_direction_positive) and (inter_orbit_neg_satnum is not None):
+                inter_orbit_choice_avail = True
+        if intra_orbit_hop_count > 0:
+            if intra_orbit_direction_positive and (intra_orbit_pos_satnum is not None):
+                intra_orbit_choice_avail = True
+            elif (not intra_orbit_direction_positive) and (intra_orbit_neg_satnum is not None):
+                intra_orbit_choice_avail = True
+
+        next_hop_satnum = None
+        if intra_orbit_choice_avail and inter_orbit_choice_avail:
+            go_inter = random.randint (0,1)
+            if go_inter == 1:
+                result = "Go inter-orbit"
+            else:
+                result = "Go intra-orbit"
+            print(f"\t::distributed_coin_flip_route:: Coin flip is {result}")
+            if go_inter == 1:
+                if inter_orbit_direction_positive:
+                    next_hop_satnum = inter_orbit_pos_satnum
+                    print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going inter-orbit positive")
+                else:
+                    next_hop_satnum = inter_orbit_neg_satnum
+                    print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going inter-orbit negative")
+            else:
+                if intra_orbit_direction_positive:
+                    next_hop_satnum = intra_orbit_pos_satnum
+                    print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going intra-orbit positive")
+                else:
+                    next_hop_satnum = intra_orbit_neg_satnum
+                    print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going intra-orbit negative")
+        elif intra_orbit_choice_avail and intra_orbit_hop_count > 0:
+            print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} has only intra-orbit sats available")
+            if intra_orbit_direction_positive:
+                next_hop_satnum = intra_orbit_pos_satnum
+                print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going intra-orbit positive")
+            else:
+                next_hop_satnum = intra_orbit_neg_satnum
+                print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going intra-orbit negative")
+        elif inter_orbit_choice_avail and inter_orbit_hop_count > 0:
+            print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} has only inter-orbit sats available")
+            if inter_orbit_direction_positive:
+                next_hop_satnum = inter_orbit_pos_satnum
+                print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going inter-orbit positive")
+            else:
+                next_hop_satnum = inter_orbit_neg_satnum
+                print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going inter-orbit negative")
+        else:
+            print(f"::distributed_coin_flip_route:: No appropriate neighbors available")
+            return None
+        print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) selected next hop {next_hop_satnum} (orbit {get_routing_sat_obj_by_satnum (next_hop_satnum).orbit_number}, index {get_routing_sat_obj_by_satnum (next_hop_satnum).sat_index})")
+        return next_hop_satnum
+        
+    def distributed_naive_route (self, available_neigh_routing_sats, dest_satnum):
+        #name = ""Distributed Naive Basic""
+                
+        # Get available neighbors
+        inter_orbit_pos_satnum = None
+        inter_orbit_neg_satnum = None
+        intra_orbit_pos_satnum = None
+        intra_orbit_neg_satnum = None
+        for neigh_routing_sat in available_neigh_routing_sats:
+            if neigh_routing_sat.orbit_number == self.orbit_number: # same orbit, so intra-orbit
+                if neigh_routing_sat.sat_index == (self.sat_index + 1)%sats_per_orbit:
+                    intra_orbit_pos_satnum = neigh_routing_sat.sat.model.satnum
+                elif neigh_routing_sat.sat_index == (self.sat_index - 1)%sats_per_orbit:
+                    intra_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
+            else:                                                   # different orbit, so inter-orbit      
+                if neigh_routing_sat.orbit_number == (self.orbit_number + 1)%orbit_cnt:
+                    if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
+                        inter_orbit_pos_satnum = neigh_routing_sat.sat.model.satnum
+                elif neigh_routing_sat.orbit_number == (self.orbit_number - 1)%orbit_cnt:
+                    if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
+                        inter_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
+                
+        (inter_orbit_hop_count, inter_orbit_direction_positive), (intra_orbit_hop_count, intra_orbit_direction_positive) = get_inter_intra_min_hop_count (self.sat.model.satnum, dest_satnum)
+        if not inter_orbit_direction_positive:
+            inter_orbit_symbol = '+'
+        else:
+            inter_orbit_symbol = '-'
+        if not intra_orbit_direction_positive:
+            intra_orbit_symbol = '+'
+        else:
+            intra_orbit_symbol = '-'
+
+        print(f"::distributed_coin_flip_route:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) has inter_orbit_hop_count {inter_orbit_symbol}{inter_orbit_hop_count} and intra_orbit_hop_count {intra_orbit_symbol}{intra_orbit_hop_count} to destination satnum {dest_satnum} (orbit {get_routing_sat_obj_by_satnum (dest_satnum).orbit_number}, index {get_routing_sat_obj_by_satnum (dest_satnum).sat_index})")
+
+        inter_orbit_choice_avail = False
+        intra_orbit_choice_avail = False
+        if inter_orbit_hop_count > 0:
+            if inter_orbit_direction_positive and (inter_orbit_pos_satnum is not None):
+                inter_orbit_choice_avail = True
+            elif (not inter_orbit_direction_positive) and (inter_orbit_neg_satnum is not None):
+                inter_orbit_choice_avail = True
+        if intra_orbit_hop_count > 0:
+            if intra_orbit_direction_positive and (intra_orbit_pos_satnum is not None):
+                intra_orbit_choice_avail = True
+            elif (not intra_orbit_direction_positive) and (intra_orbit_neg_satnum is not None):
+                intra_orbit_choice_avail = True
+
+        next_hop_satnum = None
+        if inter_orbit_choice_avail and inter_orbit_hop_count > 0: # attempt to make inter-orbit hops first
+            print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} has only inter-orbit sats available")
+            if inter_orbit_direction_positive:
+                next_hop_satnum = inter_orbit_pos_satnum
+                print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going inter-orbit positive")
+            else:
+                next_hop_satnum = inter_orbit_neg_satnum
+                print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going inter-orbit negative")
+        elif intra_orbit_choice_avail and intra_orbit_hop_count > 0: # if no inter-orbit hops available, do intra-orbit
+            print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} has only intra-orbit sats available")
+            if intra_orbit_direction_positive:
+                next_hop_satnum = intra_orbit_pos_satnum
+                print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going intra-orbit positive")
+            else:
+                next_hop_satnum = intra_orbit_neg_satnum
+                print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going intra-orbit negative")
+        else:
+            print(f"::distributed_coin_flip_route:: No appropriate neighbors available")
+            return None
+        print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) selected next hop {next_hop_satnum} (orbit {get_routing_sat_obj_by_satnum (next_hop_satnum).orbit_number}, index {get_routing_sat_obj_by_satnum (next_hop_satnum).sat_index})")
+        return next_hop_satnum
         
 
     # Requires use of tri_coordinates.py module
@@ -2627,6 +2794,41 @@ def test_circumnavigate():
 
     draw_static_plot(test_list, f"Go East, Northx2, West - {len(test_list)} sats")
 
+def get_inter_intra_min_hop_count (curr_satnum, dest_satnum):
+    current_orbit_number = get_routing_sat_obj_by_satnum (curr_satnum).orbit_number
+    destination_orbit_number = get_routing_sat_obj_by_satnum (dest_satnum).orbit_number
+    if current_orbit_number >= destination_orbit_number:
+        inter_orbit_hop_count_neg = current_orbit_number - destination_orbit_number # neg direction
+        inter_orbit_hop_count_pos = (destination_orbit_number + orbit_cnt) - current_orbit_number # pos direction
+    else:
+        inter_orbit_hop_count_pos = destination_orbit_number - current_orbit_number # pos direction
+        inter_orbit_hop_count_neg = (current_orbit_number + orbit_cnt) - destination_orbit_number # neg direction
+
+    if inter_orbit_hop_count_pos >= inter_orbit_hop_count_neg:
+        inter_orbit_hop_count = inter_orbit_hop_count_neg
+        inter_orbit_direction_positive = False
+    else:
+        inter_orbit_hop_count = inter_orbit_hop_count_pos
+        inter_orbit_direction_positive = True
+
+    current_orbit_index_number = get_routing_sat_obj_by_satnum (curr_satnum).sat_index
+    destination_orbit_index_number = get_routing_sat_obj_by_satnum(dest_satnum).sat_index
+    if current_orbit_index_number >= destination_orbit_index_number:
+        intra_orbit_hop_count_neg = current_orbit_index_number - destination_orbit_index_number
+        intra_orbit_hop_count_pos = (destination_orbit_index_number + sats_per_orbit) - current_orbit_index_number
+    else:
+        intra_orbit_hop_count_pos = destination_orbit_index_number - current_orbit_index_number
+        intra_orbit_hop_count_neg = (current_orbit_index_number + sats_per_orbit) - destination_orbit_index_number
+
+    if intra_orbit_hop_count_pos > intra_orbit_hop_count_neg:
+        intra_orbit_hop_count = intra_orbit_hop_count_neg
+        intra_orbit_direction_positive = False
+    else:
+        intra_orbit_hop_count = intra_orbit_hop_count_pos
+        intra_orbit_direction_positive = True
+
+    return (inter_orbit_hop_count, inter_orbit_direction_positive), (intra_orbit_hop_count, intra_orbit_direction_positive)
+
 def find_route_random(src, dest): # NOTE: Currently non-functional - need to update !!!
     # Find satellite at least 60 deg above the horizon at source
     for r_sat in sat_object_list:
@@ -3412,7 +3614,7 @@ def distributed_link_state_routing():
     if csv_output:
         if routing_name == "Distributed Link State TriCoord":
             string = f"current_increment,satnum,packet_ttl,num_hops,distance_traveled,transit_time,expected_min_hops,expected_max_hops,prev_hop_list"
-        elif (routing_name == "Distributed Link State Bearing") or (routing_name == "Distributed Dijkstar Distance") or (routing_name == "Distributed Dijkstar Hop") or (routing_name == "Distributed Motif"):
+        elif (routing_name == "Distributed Link State Bearing") or (routing_name == "Distributed Dijkstar Distance") or (routing_name == "Distributed Dijkstar Hop") or (routing_name == "Distributed Motif") or (routing_name == "Distributed Coin Flip") or (routing_name == "Distributed Naive Basic"):
             string = f"current_increment,satnum,packet_ttl,num_hops,distance_traveled,transit_time,prev_hop_list"
         csv_file.write(string + "\n")
     max_time_inverals = int(num_time_intervals * 1.5) # allow some additional time to process any packets that may have been delayed
@@ -3433,6 +3635,8 @@ def distributed_link_state_routing():
             all_sats_update_neigh_state()  # each satellite publishes it's state to it's neighbors and then the satellites process the received data
             compute_time = time.process_time() - start
             print(f"Time to compute neighbor states: {compute_time}")
+        else:
+            print(f"\n<Not updating neighbor states> - Time interval: {cur_time_increment} / Link state update interval: {link_state_update_interval}")
         
         # 2. Perform any additional advertisements if necessary (if on update interval)
         if routing_name == "Distributed Dijkstar Distance" or routing_name == "Distributed Dijkstar Hop":
@@ -4450,7 +4654,7 @@ def main ():
         directed_dijkstar_hop_routing()
     elif routing_name == "Directed Dijkstar Distance":
         directed_dijkstar_distance_routing()
-    elif (routing_name == "Distributed Link State Bearing") or (routing_name == "Distributed Link State TriCoord") or (routing_name == "Distributed Dijkstar Distance") or (routing_name == "Distributed Dijkstar Hop") or (routing_name == "Distributed Motif"):
+    elif (routing_name == "Distributed Link State Bearing") or (routing_name == "Distributed Link State TriCoord") or (routing_name == "Distributed Dijkstar Distance") or (routing_name == "Distributed Dijkstar Hop") or (routing_name == "Distributed Motif") or (routing_name == "Distributed Coin Flip") or (routing_name == "Distributed Naive Basic"):
         distributed_link_state_routing()
     else:
         print(f"\n::main:: NO KNOWN ROUTING NAME SPECIFIED!!!  routing_name: {routing_name}")
