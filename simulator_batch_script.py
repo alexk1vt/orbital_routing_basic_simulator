@@ -44,10 +44,14 @@ DistNaiveBasic_routing_method = "Distributed Naive Basic"
 type_I_disruption_schedule = "type_I"
 
 # WHICH RUNS TO DO
-run_list = [1]
-#run_list = [1,2,3]
-#run_list = [4,5,6]
-#run_list = [10]
+run_list = [1, 4, 7, 11, 14] # No disruption scenarios for all routing types
+#run_list = [1,2,3] # TriCoord
+#run_list = [4,5,6] # Dist Motif
+#run_list = [7,8,9] # Dist Dijkstar Hop
+#run_list = [11,12,13] # Dist Coin Toss
+#run_list = [14,15,16] # Dist Naive Basic
+#run_list = [10] # Experimental
+
 # 1: TriCoord, no disruptions
 # 2: TriCoord, disruptions, Reims, 25
 # 3: TriCoord, disruptions, Reims, 75
@@ -64,8 +68,8 @@ run_list = [1]
 routing_method_arg = TriCoord_routing_method
 packet_schedule_arg = EW_high_latitude_packet
 interval_arg = "60" # Simulator updates every 1 minute
-update_interval_arg = "60" # Satellites update each other every 1 minute
-num_increments_arg = "2" # 20 hours
+update_interval_arg = "2" # Satellites update every 2 minutes
+num_increments_arg = "60" # 2 hours
 num_packets_per_interval_arg = "10"
 
 # Output path
