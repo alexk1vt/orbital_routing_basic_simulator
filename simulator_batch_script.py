@@ -69,11 +69,10 @@ num_packets_per_interval_arg = "10"
 # Output path
 if systemOS == 'Linux':
     path = "/home/alex/repos/orbital_routing_basic_simulator/"
-    output_path = path + "outputs/"
+    output_path = path + "outputs/" + routing_method_arg.replace(" ", "_") + "/"
 elif systemOS == 'Windows':
     path = "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\"
-    output_path = path + "outputs\\"
-
+    output_path = path + "outputs\\" + routing_method_arg.replace(" ", "_") + "/"
 if not os.path.exists(output_path):
     os.makedirs(output_path)
 
@@ -212,6 +211,16 @@ else:
 # Script arguments
 routing_method_arg = DistMotif_routing_method
 
+# Output path
+if systemOS == 'Linux':
+    path = "/home/alex/repos/orbital_routing_basic_simulator/"
+    output_path = path + "outputs/" + routing_method_arg.replace(" ", "_") + "/"
+elif systemOS == 'Windows':
+    path = "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\"
+    output_path = path + "outputs\\" + routing_method_arg.replace(" ", "_") + "/"
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
+
 # CSV output argument
 csv_friendly_routing_method_arg = routing_method_arg.replace(" ", "_")
 # no disruptions
@@ -346,6 +355,16 @@ else:
 
 # Script arguments
 routing_method_arg = DistDijkstarHop_routing_method
+
+# Output path
+if systemOS == 'Linux':
+    path = "/home/alex/repos/orbital_routing_basic_simulator/"
+    output_path = path + "outputs/" + routing_method_arg.replace(" ", "_") + "/"
+elif systemOS == 'Windows':
+    path = "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\"
+    output_path = path + "outputs\\" + routing_method_arg.replace(" ", "_") + "/"
+if not os.path.exists(output_path):
+    os.makedirs(output_path)
 
 # CSV output argument
 csv_friendly_routing_method_arg = routing_method_arg.replace(" ", "_")
