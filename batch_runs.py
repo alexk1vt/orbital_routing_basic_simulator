@@ -47,8 +47,8 @@ type_I_disruption_schedule = "type_I"
 # Standard sim arguments
 interval_arg = "60" # Simulator updates every 1 minute
 update_interval_arg = "2" # Satellites update every 2 minutes
-num_increments_arg = "60" # 1 hour
-num_packets_per_interval_arg = "4"#"10"
+num_increments_arg = "35" # 0.35 hours
+num_packets_per_interval_arg = "10"#"10"
 
 # Disruption arguments (static)
 disruption_schedule_arg = type_I_disruption_schedule
@@ -58,7 +58,7 @@ disruption_option_overhead_angle = "30"
 
 # Disruption arguments (dynamic)
 routing_method_list = [DistNaiveBasic_routing_method, DistCoinFlip_routing_method, TriCoord_routing_method, DistDijkstarHop_routing_method, DistMotif_routing_method]
-packet_schedule_list = [EW_high_latitude_packet]
+packet_schedule_list = [EW_equator_packet]
 disruption_schedule_list = [no_disruption_schedule] #[no_disruption_schedule, type_I_disruption_schedule]
 disruption_location_list = ["Reims"]
 disruption_intensity_list = ["25", "75"]
