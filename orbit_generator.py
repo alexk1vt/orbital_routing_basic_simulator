@@ -1119,7 +1119,7 @@ class RoutingSat:
                     axis_change_needed = True
                 #inferior_axis = 'C' 
             
-            axis_change_needed = True # for now, always change axis
+            # axis_change_needed = True # for now, always change axis
             if not axis_change_needed: # continue sending packet along current axis unless the target axis is down at the neighbor
                 #print(f"::link_state_routing_method_triCoord:: satnum {self.satnum} has prev_hop_satnum {prev_hop_satnum} - sending packet along same axis")
                 if (prev_hop_satnum == self.fore_sat_satnum) and (not self.aft_sat_satnum is None):
@@ -3658,7 +3658,7 @@ def distributed_link_state_routing():
         # 3. Work through packet scheduler at each time interval and send all scheduled packets
         if cur_time_increment in packet_schedule:
             packet_send_list = packet_schedule[cur_time_increment]
-            print(f"::disributed_link_state_routing::  Sending {len(packet_send_list)} scheduled packets from ground terminals")
+            print(f"::distributed_link_state_routing::  Sending {len(packet_send_list)} scheduled packets from ground terminals")
             for packet in packet_send_list:
                 src, dest = packet
                 if send_distributed_routing_packet_from_source(src, dest) == -1:
