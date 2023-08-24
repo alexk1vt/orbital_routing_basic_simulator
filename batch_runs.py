@@ -21,6 +21,7 @@ specify_disruption_schedule_arg = "-l"
 specify_disruption_option_arg = "-z"
 specify_csv_output_arg = "-v"
 do_disruptions_arg = "-d"
+specify_start_increment_arg = "-b"
 
 # Empty arguments
 routing_method_arg = ""
@@ -35,6 +36,7 @@ NS_new_world_packet = "NS_new_world"
 
 # Routing method arguments
 TriCoord_routing_method = "Distributed Link State TriCoord"
+TriCoord_routing_method_alt1 = "Distributed Link State TriCoord Alt1"
 DistDijkstarHop_routing_method = "Distributed Dijkstar Hop"
 DistMotif_routing_method = "Distributed Motif"
 DistCoinFlip_routing_method = "Distributed Coin Flip"
@@ -44,24 +46,29 @@ DistNaiveBasic_routing_method = "Distributed Naive Basic"
 no_disruption_schedule = None
 type_I_disruption_schedule = "type_I"
 
+# ~~~~ CONFIGURABLE VARIABLES ~~~~ #
+
 # Standard sim arguments
-interval_arg = "60" # Simulator updates every 1 minute
-update_interval_arg = "2" # Satellites update every 2 minutes
-num_increments_arg = "35" # 0.35 hours
+interval_arg = "5" # Simulator updates every 5 seconds
+update_interval_arg = "6" # Satellites update every 30 seconds
+num_increments_arg = "360" # 30 min simulation run time
 num_packets_per_interval_arg = "10"#"10"
+start_time_increment = "1668" # 139 minutes  [EW_equator_packet: 139-168 min]
 
 # Disruption arguments (static)
-disruption_schedule_arg = type_I_disruption_schedule
 disruption_option_start = "2"#"300" # 5 hours
 disruption_option_end = "3"#"600" # 10 hours
 disruption_option_overhead_angle = "30"
 
 # Disruption arguments (dynamic)
-routing_method_list = [DistNaiveBasic_routing_method, DistCoinFlip_routing_method, TriCoord_routing_method, DistDijkstarHop_routing_method, DistMotif_routing_method]
+#routing_method_list = [DistNaiveBasic_routing_method, DistCoinFlip_routing_method, TriCoord_routing_method, DistDijkstarHop_routing_method, DistMotif_routing_method]
+routing_method_list = [TriCoord_routing_method]
 packet_schedule_list = [EW_equator_packet]
 disruption_schedule_list = [no_disruption_schedule] #[no_disruption_schedule, type_I_disruption_schedule]
 disruption_location_list = ["Reims"]
 disruption_intensity_list = ["25", "75"]
+
+# ~~~~ END CONFIGURABLE VARIABLES ~~~~ #
 
 current_run = 1
 number_of_disruption_types = len([x for x in disruption_schedule_list if x != no_disruption_schedule])
@@ -73,19 +80,20 @@ number_of_disruption_runs = len(routing_method_list) * len(packet_schedule_list)
 number_of_runs = number_of_disruption_runs + number_of_no_disruption_runs
 print(f"Number of runs: {number_of_runs} ({number_of_no_disruption_runs} no disruption runs, {number_of_disruption_runs} disruption runs)")
 
-
 print(f"Static Arguments:")
 print(f"\tinterval_arg: {interval_arg}")
 print(f"\tupdate_interval_arg: {update_interval_arg}")
 print(f"\tnum_increments_arg: {num_increments_arg}")
 print(f"\tnum_packets_per_interval_arg: {num_packets_per_interval_arg}")
+print(f"\tstart_time_increment: {start_time_increment}")
 
 print(f"\nDynamic Arguments:")
 print(f"\trouting_method_list: {routing_method_list}")
 print(f"\tpacket_schedule_list: {packet_schedule_list}")
 print(f"\tdisruption_schedule_list: {disruption_schedule_list}")
-print(f"\tdisruption_location_list: {disruption_location_list}")
-print(f"\tdisruption_intensity_list: {disruption_intensity_list}")
+if not (len(disruption_schedule_list) and disruption_schedule_list[0] == no_disruption_schedule):
+    print(f"\tdisruption_location_list: {disruption_location_list}")
+    print(f"\tdisruption_intensity_list: {disruption_intensity_list}")
 
 for routing_method_arg in routing_method_list:
     for packet_schedule_arg in packet_schedule_list:
@@ -104,7 +112,7 @@ for routing_method_arg in routing_method_list:
                 # CSV output argument
                 csv_path = output_path
                 csv_friendly_routing_method_arg = routing_method_arg.replace(" ", "_")
-                csv_output_name = csv_friendly_routing_method_arg + "_" + packet_schedule_arg + "_i_" + interval_arg + "_e_" + update_interval_arg + "_n_" + num_increments_arg + "_k_" + num_packets_per_interval_arg + ".csv"
+                csv_output_name = csv_friendly_routing_method_arg + "_" + packet_schedule_arg + "_i_" + interval_arg + "_e_" + update_interval_arg + "_n_" + num_increments_arg + "_b_" + start_time_increment + "_k_" + num_packets_per_interval_arg + ".csv"
                 csv_output_arg = csv_path + csv_output_name
                 # Std output file path
                 std_output_path = output_path + csv_output_name + "_std_output.txt"
@@ -113,7 +121,7 @@ for routing_method_arg in routing_method_list:
                 print(f"\tRouting Method: {routing_method_arg}")
                 print(f"\tPacket Schedule: {packet_schedule_arg}")
                 print("  Running the simulator with the following arguments:")
-                print(f"  {python} orbit_generator.py {specify_routing_method_arg} {routing_method_arg} {specify_packet_schedule_arg} {packet_schedule_arg} {specify_interval_arg} {interval_arg} {specify_update_interval_arg} {update_interval_arg} {specify_num_increments_arg} {num_increments_arg} {specify_num_packets_per_interval_arg} {num_packets_per_interval_arg} {specify_csv_output_arg} {csv_output_arg}")
+                print(f"  {python} orbit_generator.py {specify_routing_method_arg} '{routing_method_arg}' {specify_packet_schedule_arg} {packet_schedule_arg} {specify_interval_arg} {interval_arg} {specify_update_interval_arg} {update_interval_arg} {specify_num_increments_arg} {num_increments_arg} {specify_start_increment_arg} {start_time_increment} {specify_num_packets_per_interval_arg} {num_packets_per_interval_arg} {specify_csv_output_arg} {csv_output_arg}")
                 print(f"  Std output will be saved to {std_output_path}")
                 start_time = datetime.now()
                 print(f"  Start time is: {start_time.time()}")
@@ -125,6 +133,7 @@ for routing_method_arg in routing_method_list:
                                     specify_interval_arg, interval_arg,
                                     specify_update_interval_arg, update_interval_arg,
                                     specify_num_increments_arg, num_increments_arg,
+                                    specify_start_increment_arg, start_time_increment,
                                     specify_num_packets_per_interval_arg, num_packets_per_interval_arg,
                                     specify_csv_output_arg, csv_output_arg], 
                                     stdout=f, stderr=subprocess.STDOUT)
@@ -165,7 +174,7 @@ for routing_method_arg in routing_method_list:
                         print(f"\tDisruption Overhead Angle: {disruption_option_overhead_angle}")
                         print("  Running the simulator with the following arguments:")
                         # disruptions
-                        print(f"  {python} orbit_generator.py {specify_routing_method_arg} {routing_method_arg} {specify_packet_schedule_arg} {packet_schedule_arg} {specify_interval_arg} {interval_arg} {specify_update_interval_arg} {update_interval_arg} {specify_num_increments_arg} {num_increments_arg} {specify_num_packets_per_interval_arg} {num_packets_per_interval_arg} {do_disruptions_arg} {specify_disruption_schedule_arg} {disruption_schedule_arg} {specify_disruption_option_arg} {disruption_option_arg} {specify_csv_output_arg} {csv_output_arg}")
+                        print(f"  {python} orbit_generator.py {specify_routing_method_arg} {routing_method_arg} {specify_packet_schedule_arg} {packet_schedule_arg} {specify_interval_arg} {interval_arg} {specify_update_interval_arg} {update_interval_arg} {specify_num_increments_arg} {num_increments_arg} {specify_start_increment_arg} {start_time_increment} {specify_num_packets_per_interval_arg} {num_packets_per_interval_arg} {do_disruptions_arg} {specify_disruption_schedule_arg} {disruption_schedule_arg} {specify_disruption_option_arg} {disruption_option_arg} {specify_csv_output_arg} {csv_output_arg}")
                         print(f"  Std output will be saved to {std_output_path}")
                         start_time = datetime.now()
                         print(f"  Start time is: {start_time.time()}")
@@ -177,6 +186,7 @@ for routing_method_arg in routing_method_list:
                                             specify_interval_arg, interval_arg,
                                             specify_update_interval_arg, update_interval_arg,
                                             specify_num_increments_arg, num_increments_arg,
+                                            specify_start_increment_arg, start_time_increment,
                                             specify_num_packets_per_interval_arg, num_packets_per_interval_arg,
                                             do_disruptions_arg, specify_disruption_schedule_arg, disruption_schedule_arg,
                                             specify_disruption_option_arg, disruption_option_arg,

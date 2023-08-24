@@ -107,7 +107,7 @@ class baseS:
         return self.getDecimalValue() != other.getDecimalValue()
     
     def __lt__(self, other):
-        if type(other) == int:
+        if type(other) == int or type(other) == float:
             return self.getDecimalValue() < other
         return self.getDecimalValue() < other.getDecimalValue()
     
