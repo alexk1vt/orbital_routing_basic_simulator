@@ -61,11 +61,11 @@ disruption_option_end = "3"#"600" # 10 hours
 disruption_option_overhead_angle = "30"
 
 # Disruption arguments (dynamic)
-#routing_method_list = [DistNaiveBasic_routing_method, DistCoinFlip_routing_method, TriCoord_routing_method, DistDijkstarHop_routing_method, DistMotif_routing_method]
-routing_method_list = [TriCoord_routing_method]
+routing_method_list = [DistNaiveBasic_routing_method, DistCoinFlip_routing_method, TriCoord_routing_method, DistDijkstarHop_routing_method, DistMotif_routing_method]
+#routing_method_list = [TriCoord_routing_method]
 packet_schedule_list = [EW_equator_packet]
-disruption_schedule_list = [no_disruption_schedule] #[no_disruption_schedule, type_I_disruption_schedule]
-disruption_location_list = ["Reims"]
+disruption_schedule_list = [type_I_disruption_schedule] #[no_disruption_schedule] #[no_disruption_schedule, type_I_disruption_schedule]
+disruption_location_list = ["Baraawe"]#["Reims"]
 disruption_intensity_list = ["25", "75"]
 
 # ~~~~ END CONFIGURABLE VARIABLES ~~~~ #
@@ -158,7 +158,7 @@ for routing_method_arg in routing_method_list:
                         csv_path = output_path
                         csv_friendly_routing_method_arg = routing_method_arg.replace(" ", "_")
                         csv_friendly_disruption_option_arg = disruption_option_arg.replace(",", "_")
-                        csv_output_name = csv_friendly_routing_method_arg + "_" + packet_schedule_arg + "_i_" + interval_arg + "_e_" + update_interval_arg + "_n_" + num_increments_arg + "_k_" + num_packets_per_interval_arg + "_d_l_" + disruption_schedule_arg + "_z_" + csv_friendly_disruption_option_arg + ".csv"
+                        csv_output_name = csv_friendly_routing_method_arg + "_" + packet_schedule_arg + "_i_" + interval_arg + "_e_" + update_interval_arg + "_n_" + num_increments_arg+ "_b_" + start_time_increment + "_k_" + num_packets_per_interval_arg + "_d_l_" + disruption_schedule_arg + "_z_" + csv_friendly_disruption_option_arg + ".csv"
                         csv_output_arg = csv_path + csv_output_name
                         # Std output file path
                         std_output_path = output_path + csv_output_name + "_std_output.txt"
@@ -180,7 +180,7 @@ for routing_method_arg in routing_method_list:
                         print(f"  Start time is: {start_time.time()}")
                         # Run the simulator
                         with open (std_output_path, "w") as f:
-                            subprocess.run([python, "C:\\Users\\xande\\source\\repos\\orbital_routing_basic_simulator\\orbit_generator.py ",
+                            subprocess.run([python, path +"orbit_generator.py",
                                             specify_routing_method_arg, routing_method_arg, 
                                             specify_packet_schedule_arg, packet_schedule_arg,
                                             specify_interval_arg, interval_arg,
