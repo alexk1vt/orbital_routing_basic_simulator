@@ -110,15 +110,15 @@ disruption_schedule = {} # a dictionary with time interval integers as keys and 
 disrupted_regions_dict = {} # a dictionary with GeographicPosition objects as keys and TTL values as values
 
 # Adjacent satellite characterisitcs
-g_lat_range = 1 # satellites to E/W can fall within +- this value
+#g_lat_range = 1 # satellites to E/W can fall within +- this value -- currently unused
 lateral_antenna_range = 30 #30  # in degrees.  Lateral satellite bearings can fall +- lateral_antenna_range / 2
 # lateral antenna interface bearings
 port_interface_bearing = 70 #90
 starboard_interface_bearing = 250 #270
-fore_port_interface_bearing = 25 # 45
-fore_starboard_interface_bearing = 335 #315
-aft_port_interface_bearing = 155 #135
-aft_starboard_interface_bearing = 205 #225
+fore_port_interface_bearing = 22 #25 - was missing satellites at bearing 7.99 - 9.77
+fore_starboard_interface_bearing = 338 #335 - was missing satellites at bearing 350.00 - 352.02
+aft_port_interface_bearing = 158 #155 - was missing satellites at bearing 170.32 - 171.51
+aft_starboard_interface_bearing = 202 #205 - was missing satellites at bearing 188.00 - 190.25
 # maximum antenna range in km
 max_lateral_antenna_range = 1500 # 1500 km
 
@@ -558,7 +558,7 @@ class RoutingSat:
             return True
         return False
     
-    def check_neighboring_orbit_sat_available(self, neighboring_orbit_num): # returns satnum if sat is within range (None otherwise).  If satnum is other than None, interface will indicate which ('port'/'starboard')
+    def check_neighboring_orbit_sat_available(self, neighboring_orbit_num, aperature_range_extension = 0, distance_range_extension = 0): # returns satnum if sat is within range (None otherwise).  If satnum is other than None, interface will indicate which ('port'/'starboard')
         interfaces = ['port', 'starboard', 'fore_port', 'fore_starboard', 'aft_port', 'aft_starboard']
         neighboring_satnum_list = []
         # get our bearings
@@ -568,18 +568,18 @@ class RoutingSat:
         #aft_port_bearing = 135
         #aft_starboard_bearing = 225
         # find min/max for each interface
-        port_range_min = port_interface_bearing-int(lateral_antenna_range/2)
-        port_range_max = port_interface_bearing+int(lateral_antenna_range/2)
-        starboard_range_min = starboard_interface_bearing-int(lateral_antenna_range/2)
-        starboard_range_max = starboard_interface_bearing+int(lateral_antenna_range/2)
-        fore_port_range_min = fore_port_interface_bearing-int(lateral_antenna_range/2)
-        fore_port_range_max = fore_port_interface_bearing+int(lateral_antenna_range/2)
-        fore_starboard_range_min = fore_starboard_interface_bearing-int(lateral_antenna_range/2)
-        fore_starboard_range_max = fore_starboard_interface_bearing+int(lateral_antenna_range/2)
-        aft_port_range_min = aft_port_interface_bearing-int(lateral_antenna_range/2)
-        aft_port_range_max = aft_port_interface_bearing+int(lateral_antenna_range/2)
-        aft_starboard_range_min = aft_starboard_interface_bearing-int(lateral_antenna_range/2)
-        aft_starboard_range_max = aft_starboard_interface_bearing+int(lateral_antenna_range/2)
+        port_range_min = port_interface_bearing-int((lateral_antenna_range+aperature_range_extension)/2)
+        port_range_max = port_interface_bearing+int((lateral_antenna_range+aperature_range_extension)/2)
+        starboard_range_min = starboard_interface_bearing-int((lateral_antenna_range+aperature_range_extension)/2)
+        starboard_range_max = starboard_interface_bearing+int((lateral_antenna_range+aperature_range_extension)/2)
+        fore_port_range_min = fore_port_interface_bearing-int((lateral_antenna_range+aperature_range_extension)/2)
+        fore_port_range_max = fore_port_interface_bearing+int((lateral_antenna_range+aperature_range_extension)/2)
+        fore_starboard_range_min = fore_starboard_interface_bearing-int((lateral_antenna_range+aperature_range_extension)/2)
+        fore_starboard_range_max = fore_starboard_interface_bearing+int((lateral_antenna_range+aperature_range_extension)/2)
+        aft_port_range_min = aft_port_interface_bearing-int((lateral_antenna_range+aperature_range_extension)/2)
+        aft_port_range_max = aft_port_interface_bearing+int((lateral_antenna_range+aperature_range_extension)/2)
+        aft_starboard_range_min = aft_starboard_interface_bearing-int((lateral_antenna_range+aperature_range_extension)/2)
+        aft_starboard_range_max = aft_starboard_interface_bearing+int((lateral_antenna_range+aperature_range_extension)/2)
         #print(f"::check_neighboring_orbit_sat_available:: Interface intervals: fore_port: {fore_port_range_min}-{fore_port_range_max}, fore_starboard: {fore_starboard_range_min}-{fore_starboard_range_max}, aft_port: {aft_port_range_min}-{aft_port_range_max}, aft_starboard: {aft_starboard_range_min}-{aft_starboard_range_max}")
 
         # find min/max satnums for target orbit
@@ -591,7 +591,7 @@ class RoutingSat:
         for test_satnum in range(min_satnum, max_satnum):
             test_sat_bearing = get_rel_bearing_by_satnum_degrees(self.sat.model.satnum, test_satnum, heading)
             distance, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, test_satnum)
-            if distance > max_lateral_antenna_range:
+            if distance > (max_lateral_antenna_range + distance_range_extension):
                 continue  # Don't try to connect to lateral satellites with distances > 1000km - seems like an unreasonable ability 
             #print(f"::check_neighboring_orbit_sat_available:: Testing satnum {test_satnum} at bearing {test_sat_bearing:.0f} with distance {distance:,.0f}")
             if (test_sat_bearing - port_range_min) % 360 <= (port_range_max - port_range_min) % 360:
@@ -1829,22 +1829,30 @@ class RoutingSat:
 
     def get_list_of_cur_sat_neighbors(self):
         avail_neigh_routing_sats = []
-        if self.fore_int_up and (self.fore_sat_satnum is not None) and ((self.fore_sat_satnum in self.neigh_state_dict) and (self.neigh_state_dict[self.fore_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_sat_satnum])
-        if self.aft_int_up and (self.aft_sat_satnum is not None) and ((self.aft_sat_satnum in self.neigh_state_dict) and (self.neigh_state_dict[self.aft_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_sat_satnum])
-        if self.port_int_up and (self.port_sat_satnum is not None) and ((self.port_sat_satnum in self.neigh_state_dict) and (self.neigh_state_dict[self.port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.port_sat_satnum])
-        if self.starboard_int_up and (self.starboard_sat_satnum is not None) and ((self.starboard_sat_satnum in self.neigh_state_dict) and (self.neigh_state_dict[self.starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.starboard_sat_satnum])
-        if self.fore_port_int_up and (self.fore_port_sat_satnum is not None) and ((self.fore_port_sat_satnum in self.neigh_state_dict) and (self.neigh_state_dict[self.fore_port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_port_sat_satnum])
-        if self.fore_starboard_int_up and (self.fore_starboard_sat_satnum is not None) and ((self.fore_starboard_sat_satnum in self.neigh_state_dict) and (self.neigh_state_dict[self.fore_starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_starboard_sat_satnum])
-        if self.aft_port_int_up and (self.aft_port_sat_satnum is not None) and ((self.aft_port_sat_satnum in self.neigh_state_dict) and (self.neigh_state_dict[self.aft_port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_port_sat_satnum])
-        if self.aft_starboard_int_up and (self.aft_starboard_sat_satnum is not None) and ((self.aft_starboard_sat_satnum in self.neigh_state_dict) and (self.neigh_state_dict[self.aft_starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_starboard_sat_satnum])
+        if self.fore_int_up and (self.fore_sat_satnum is not None):
+            if ((self.fore_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_sat_satnum]['connection_up'])):
+                avail_neigh_routing_sats.append(sat_object_list[self.fore_sat_satnum])
+        if self.aft_int_up and (self.aft_sat_satnum is not None):
+            if ((self.aft_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_sat_satnum]['connection_up'])):
+                avail_neigh_routing_sats.append(sat_object_list[self.aft_sat_satnum])
+        if self.port_int_up and (self.port_sat_satnum is not None):
+            if ((self.port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.port_sat_satnum]['connection_up'])):
+                avail_neigh_routing_sats.append(sat_object_list[self.port_sat_satnum])
+        if self.starboard_int_up and (self.starboard_sat_satnum is not None):
+            if ((self.starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.starboard_sat_satnum]['connection_up'])):
+                avail_neigh_routing_sats.append(sat_object_list[self.starboard_sat_satnum])
+        if self.fore_port_int_up and (self.fore_port_sat_satnum is not None):
+            if ((self.fore_port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_port_sat_satnum]['connection_up'])):
+                avail_neigh_routing_sats.append(sat_object_list[self.fore_port_sat_satnum])
+        if self.fore_starboard_int_up and (self.fore_starboard_sat_satnum is not None):
+            if ((self.fore_starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_starboard_sat_satnum]['connection_up'])):
+                avail_neigh_routing_sats.append(sat_object_list[self.fore_starboard_sat_satnum])
+        if self.aft_port_int_up and (self.aft_port_sat_satnum is not None):
+            if ((self.aft_port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_port_sat_satnum]['connection_up'])):
+                avail_neigh_routing_sats.append(sat_object_list[self.aft_port_sat_satnum])
+        if self.aft_starboard_int_up and (self.aft_starboard_sat_satnum is not None):
+            if ((self.aft_starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_starboard_sat_satnum]['connection_up'])):
+                avail_neigh_routing_sats.append(sat_object_list[self.aft_starboard_sat_satnum])
         avail_neigh_routing_sat_satnums = []
         for routing_sat in avail_neigh_routing_sats:
             avail_neigh_routing_sat_satnums.append(routing_sat.sat.model.satnum)
@@ -2601,6 +2609,8 @@ def print_connectivity_stats():
     partially_connected_sats = 0
     fore_aft_connected_sats = 0
     issue_sats = 0
+    candidate_sat_interface_range_dict = {'port': (float('inf'), 0), 'starboard': (float('inf'),0), 'fore_port': (float('inf'),0), 'fore_starboard': (float('inf'),0), 'aft_port': (float('inf'),0), 'aft_starboard': (float('inf'),0)} # 'interface': (min, max)
+    print_dict = False
     for r_sat in sat_object_list:
         neigh_satnums = r_sat.get_list_of_cur_neighbor_satnums()
         neighbor_count = len (neigh_satnums)
@@ -2608,11 +2618,89 @@ def print_connectivity_stats():
             fully_connected_sats += 1
         elif neighbor_count > 2:
             partially_connected_sats += 1
+            r_sat_lat = r_sat.get_sat_lat_degrees()
+            if abs(r_sat_lat) < 45:
+                print_dict = True
+                #string = "Satellite number,\tLatitude,\tFore,\tAft,\tPort,\tStarboard,\tFore Port,\tFore Starboard,\tAft Port,\tAft Starboard\n"
+                if r_sat.fore_sat_satnum in r_sat.neigh_state_dict:
+                    fore_string = f"Fore interface up: {r_sat.fore_int_up}, Fore satellite: {r_sat.fore_sat_satnum}, Neigh state dict 'connection up': {r_sat.neigh_state_dict[r_sat.fore_sat_satnum]['connection_up']}"
+                else:
+                    fore_string = f"Fore interface up: {r_sat.fore_int_up}, Fore satellite: {r_sat.fore_sat_satnum}, *not* in Neigh state dict"
+                if r_sat.aft_sat_satnum in r_sat.neigh_state_dict:
+                    aft_string = f"Aft interface up: {r_sat.aft_int_up}, Aft satellite: {r_sat.aft_sat_satnum}, Neigh state dict 'connection up': {r_sat.neigh_state_dict[r_sat.aft_sat_satnum]['connection_up']}"
+                else:
+                    aft_string = f"Aft interface up: {r_sat.aft_int_up}, Aft satellite: {r_sat.aft_sat_satnum}, *not* in Neigh state dict"
+                if r_sat.port_sat_satnum in r_sat.neigh_state_dict:
+                    port_string = f"Port interface up: {r_sat.port_int_up}, Port satellite: {r_sat.port_sat_satnum}, Neigh state dict 'connection up': {r_sat.neigh_state_dict[r_sat.port_sat_satnum]['connection_up']}"
+                else:
+                    port_string = f"Port interface up: {r_sat.port_int_up}, Port satellite: {r_sat.port_sat_satnum}, *not* in Neigh state dict"
+                if r_sat.starboard_sat_satnum in r_sat.neigh_state_dict:
+                    starboard_string = f"Starboard interface up: {r_sat.starboard_int_up}, Starboard satellite: {r_sat.starboard_sat_satnum}, Neigh state dict 'connection up': {r_sat.neigh_state_dict[r_sat.starboard_sat_satnum]['connection_up']}"
+                else:
+                    starboard_string = f"Starboard interface up: {r_sat.starboard_int_up}, Starboard satellite: {r_sat.starboard_sat_satnum}, *not* in Neigh state dict"
+                if r_sat.fore_port_sat_satnum in r_sat.neigh_state_dict:
+                    fore_port_string = f"Fore Port interface up: {r_sat.fore_port_int_up}, Fore Port satellite: {r_sat.fore_port_sat_satnum}, Neigh state dict 'connection up': {r_sat.neigh_state_dict[r_sat.fore_port_sat_satnum]['connection_up']}"
+                else:
+                    fore_port_string = f"Fore Port interface up: {r_sat.fore_port_int_up}, Fore Port satellite: {r_sat.fore_port_sat_satnum}, *not* in Neigh state dict"
+                if r_sat.fore_starboard_sat_satnum in r_sat.neigh_state_dict:
+                    fore_starboard_string = f"Fore Starboard interface up: {r_sat.fore_starboard_int_up}, Fore Starboard satellite: {r_sat.fore_starboard_sat_satnum}, Neigh state dict 'connection up': {r_sat.neigh_state_dict[r_sat.fore_starboard_sat_satnum]['connection_up']}"
+                else:
+                    fore_starboard_string = f"Fore Starboard interface up: {r_sat.fore_starboard_int_up}, Fore Starboard satellite: {r_sat.fore_starboard_sat_satnum}, *not* in Neigh state dict"
+                if r_sat.aft_port_sat_satnum in r_sat.neigh_state_dict:
+                    aft_port_string = f"Aft Port interface up: {r_sat.aft_port_int_up}, Aft Port satellite: {r_sat.aft_port_sat_satnum}, Neigh state dict 'connection up': {r_sat.neigh_state_dict[r_sat.aft_port_sat_satnum]['connection_up']}"
+                else:
+                    aft_port_string = f"Aft Port interface up: {r_sat.aft_port_int_up}, Aft Port satellite: {r_sat.aft_port_sat_satnum}, *not* in Neigh state dict"
+                if r_sat.aft_starboard_sat_satnum in r_sat.neigh_state_dict:
+                    aft_starboard_string = f"Aft Starboard interface up: {r_sat.aft_starboard_int_up}, Aft Starboard satellite: {r_sat.aft_starboard_sat_satnum}, Neigh state dict 'connection up': {r_sat.neigh_state_dict[r_sat.aft_starboard_sat_satnum]['connection_up']}"
+                else:
+                    aft_starboard_string = f"Aft Starboard interface up: {r_sat.aft_starboard_int_up}, Aft Starboard satellite: {r_sat.aft_starboard_sat_satnum}, *not* in Neigh state dict"
+
+                print(f"::print_connectivity_stats:: Sat {r_sat.sat.model.satnum} has {neighbor_count} neighbors at latitude {r_sat_lat:.1f}.  Sat neighbor list: {neigh_satnums}\n" +
+                      f"\t{fore_string}\n"+
+                      f"\t{aft_string}\n"+
+                      f"\t{port_string}\n"+
+                      f"\t{starboard_string}\n"+
+                      f"\t{fore_port_string}\n"+
+                      f"\t{fore_starboard_string}\n"+
+                      f"\t{aft_port_string}\n"+
+                      f"\t{aft_starboard_string}\n")
+                
+                
+                #string += get_sat_neighbor_bearings_string (r_sat)
+                #print(string)
+                r_sat_heading = get_heading_by_satnum_degrees(r_sat.sat.model.satnum)
+                preceeding_orbit_satnum_list = r_sat.check_neighboring_orbit_sat_available(r_sat.preceeding_orbit_number, aperature_range_extension = 20, distance_range_extension = 1000)
+                succeeding_orbit_satnum_list = r_sat.check_neighboring_orbit_sat_available(r_sat.succeeding_orbit_number, aperature_range_extension = 20, distance_range_extension = 1000)
+                interfaces = ['port', 'starboard', 'fore_port', 'fore_starboard', 'aft_port', 'aft_starboard']
+                r_sat_vars_dict = vars(r_sat)
+                for interface in interfaces:
+                    if (r_sat_vars_dict[interface+'_int_up']) and (r_sat_vars_dict[interface+'_sat_satnum'] is None):
+                        target_satnum = None
+                        for entry in preceeding_orbit_satnum_list:
+                            if entry[1] == interface:
+                                target_satnum = entry[0]
+                                break
+                        for entry in succeeding_orbit_satnum_list:
+                            if entry[1] == interface:
+                                target_satnum = entry[0]
+                                break
+                        if target_satnum is not None:
+                            target_satnum_rel_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, target_satnum, r_sat_heading)
+                            target_satnum_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, target_satnum)
+                            int_min, int_max = candidate_sat_interface_range_dict[interface] 
+                            if target_satnum_rel_bearing < int_min:
+                                candidate_sat_interface_range_dict[interface] = (target_satnum_rel_bearing, int_max)
+                            if target_satnum_rel_bearing > int_max:
+                                candidate_sat_interface_range_dict[interface] = (int_min, target_satnum_rel_bearing)
+                            print(f"::print_connectivity_stats:: satnum: {r_sat.sat.model.satnum}, latitude: {r_sat_lat:.1f}, interface: {interface} -- Missed candidate: satnum: {target_satnum}, Relative bearing: {target_satnum_rel_bearing:.1f}, Distance: {target_satnum_distance:.0f}km")
+
         elif neighbor_count == 2 and r_sat.fore_int_up and r_sat.aft_int_up:
             fore_aft_connected_sats += 1
         else:
             issue_sats += 1
     print(f"::print_connectivity_stats:: fully_connected_sats: {(fully_connected_sats / num_sats)*100:.0f}%, partially_connected_sats: {(partially_connected_sats / num_sats)*100:.0f}%, fore_aft_connected_sats: {(fore_aft_connected_sats / num_sats)*100:.0f}%, issue_sats: {(issue_sats / num_sats)*100:.0f}%")
+    if print_dict:
+        print(f"::print_connectivity_stats:: candidate_sat_interface_range_dict: {candidate_sat_interface_range_dict}")
     if csv_output:
         csv_file.write(f"{cur_time_increment}, {(fully_connected_sats/num_sats)*100:.0f}, {(partially_connected_sats/num_sats)*100:.0f}, {(fore_aft_connected_sats/num_sats)*100:.0f}, {(issue_sats/num_sats)*100:.0f}\n")
 
@@ -4530,39 +4618,43 @@ def print_satellite_neighbor_bearings_over_time(r_sat, num_time_increments):
         csv_file.write(string + "\n")
     for _ in range(num_time_increments):
         r_sat.update_current_neighbor_sats()
-        cur_sat_heading = get_heading_by_satnum_degrees(r_sat.sat.model.satnum)
-        lat = r_sat.get_sat_lat_degrees()
-        fore_bearing = None
-        aft_bearing = None
-        port_bearing = None
-        starboard_bearing = None
-        fore_port_bearing = None
-        fore_starboard_bearing = None
-        aft_port_bearing = None
-        aft_starboard_bearing = None
-        if r_sat.fore_sat_satnum != None:
-            fore_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_sat_satnum, cur_sat_heading) 
-            if fore_bearing > 180:
-                fore_bearing -= 360
-        if r_sat.aft_sat_satnum != None:
-            aft_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_sat_satnum, cur_sat_heading) - 180
-        if r_sat.port_sat_satnum != None:
-            port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.port_sat_satnum, cur_sat_heading) - port_interface_bearing
-        if r_sat.starboard_sat_satnum != None:
-            starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.starboard_sat_satnum, cur_sat_heading) - starboard_interface_bearing
-        if r_sat.fore_port_sat_satnum != None:
-            fore_port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_port_sat_satnum, cur_sat_heading) - fore_port_interface_bearing
-        if r_sat.fore_starboard_sat_satnum != None:
-            fore_starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_starboard_sat_satnum, cur_sat_heading) - fore_starboard_interface_bearing
-        if r_sat.aft_port_sat_satnum != None:
-            aft_port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_port_sat_satnum, cur_sat_heading) - aft_port_interface_bearing
-        if r_sat.aft_starboard_sat_satnum != None:
-            aft_starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_starboard_sat_satnum, cur_sat_heading) - aft_starboard_interface_bearing
-        string = f"{r_sat.sat.model.satnum},{lat:.2f},{fore_bearing},{aft_bearing},{port_bearing},{starboard_bearing},{fore_port_bearing},{fore_starboard_bearing},{aft_port_bearing},{aft_starboard_bearing}"
+        string = get_sat_neighbor_bearings_string(r_sat)
         print(string)
         if csv_output:
             csv_file.write(string + "\n")
         increment_time()
+
+def get_sat_neighbor_bearings_string (r_sat):
+    cur_sat_heading = get_heading_by_satnum_degrees(r_sat.sat.model.satnum)
+    lat = r_sat.get_sat_lat_degrees()
+    fore_bearing = None
+    aft_bearing = None
+    port_bearing = None
+    starboard_bearing = None
+    fore_port_bearing = None
+    fore_starboard_bearing = None
+    aft_port_bearing = None
+    aft_starboard_bearing = None
+    if r_sat.fore_sat_satnum != None:
+        fore_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_sat_satnum, cur_sat_heading) 
+        if fore_bearing > 180:
+            fore_bearing -= 360
+    if r_sat.aft_sat_satnum != None:
+        aft_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_sat_satnum, cur_sat_heading) - 180
+    if r_sat.port_sat_satnum != None:
+        port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.port_sat_satnum, cur_sat_heading) - port_interface_bearing
+    if r_sat.starboard_sat_satnum != None:
+        starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.starboard_sat_satnum, cur_sat_heading) - starboard_interface_bearing
+    if r_sat.fore_port_sat_satnum != None:
+        fore_port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_port_sat_satnum, cur_sat_heading) - fore_port_interface_bearing
+    if r_sat.fore_starboard_sat_satnum != None:
+        fore_starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.fore_starboard_sat_satnum, cur_sat_heading) - fore_starboard_interface_bearing
+    if r_sat.aft_port_sat_satnum != None:
+        aft_port_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_port_sat_satnum, cur_sat_heading) - aft_port_interface_bearing
+    if r_sat.aft_starboard_sat_satnum != None:
+        aft_starboard_bearing = get_rel_bearing_by_satnum_degrees(r_sat.sat.model.satnum, r_sat.aft_starboard_sat_satnum, cur_sat_heading) - aft_starboard_interface_bearing
+    string = f"{r_sat.sat.model.satnum},{lat:.2f},{fore_bearing},{aft_bearing},{port_bearing},{starboard_bearing},{fore_port_bearing},{fore_starboard_bearing},{aft_port_bearing},{aft_starboard_bearing}"
+    return string
 
 def sat_connectivity_plot_test (draw_plot = False):
     global csv_file
@@ -4778,7 +4870,7 @@ def main ():
         
     if starting_time_increment != 0:
         advance_start_time ()
-        
+
     # ---------- TESTING ------------
     
     if test_name == "None":
