@@ -43,11 +43,11 @@ disruption_schedule_method_options = ["random", "static", "percent", "file", "ty
 disruption_options_string = ""
 do_qos = False # QoS things like congestion control
 packet_schedule_method = "static" # "random", "alt_random", "static", "file"
-packet_schedule_method_options = ["random", "alt_random", "static", "file", "EW_equator", "EW_high_latitude", "NS_old_world", "NS_new_world"]
+packet_schedule_method_options = ["random", "alt_random", "static", "file", "EW_equator", "EW_high_latitude", "NS_old_world", "NS_new_world", "SE_to_NW", "NE_to_SW"]
 test_point_to_point = False # routes repeatedly between two static locations over specified time intervals -- MUST BE SET FOR 'STATIC' PACKET SCHEDULE METHOD
-routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif", "Distributed Coin Flip"
-routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Directed Dijkstar Hop", "Directed Dijkstar Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Link State TriCoord Alt1", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif", "Distributed Coin Flip", "Distributed Naive Basic"]
-testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time", "Dump Packet Schedule to File", "Load Packet Schedule From File", "Dump Disruption Schedule to File", "Load Disruption Schedule From File", "Draw Connectivity Plot", "Print Connectivity Stats"]
+routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif", "Distributed Coin Flip", "Distributed DisCoRoute"
+routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Directed Dijkstar Hop", "Directed Dijkstar Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Link State TriCoord Alt1", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif", "Distributed Coin Flip", "Distributed Naive Basic", "Distributed DisCoRoute"]
+testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time", "Dump Packet Schedule to File", "Load Packet Schedule From File", "Dump Disruption Schedule to File", "Load Disruption Schedule From File", "Draw Connectivity Plot", "Print Connectivity Stats", "Test Overhead Sats"]
 csv_output = None
 
 # Orbit characteristics
@@ -72,6 +72,7 @@ csv_packet_loss = None
 csv_disruption = None
 csv_rollover = None
 csv_writer = None
+csv_comp_value = None
 
 # Multi threading
 num_threads = max(os.cpu_count()-2, 1) # 4
@@ -97,6 +98,7 @@ num_packets_received = 0
 total_distance_traveled = 0
 total_hop_count = 0
 num_max_TTL_packets_dropped = 0
+interval_comp_value = 0
 
 # Global variables / trackers
 orbit_list = []
@@ -238,6 +240,8 @@ Glasgow = wgs84.latlon(48.2000 * N, 106.6333 * W) # Disruption location EW_high_
 Reims = wgs84.latlon(49.2500 * N, 4.0333 * E) # Disruption location EW_high_latitude disruption
 Bukittinggi = wgs84.latlon(0.3000 * S, 100.3667 * E) # Disruption location EW_equator disruption
 Baraawe = wgs84.latlon(1.1167 * N, 44.0500 * E) # Disruption location EW_equator disruption
+Lisbon = wgs84.latlon(38.7167 * N, 9.1333 * W) # Extra NW location
+Sapporo = wgs84.latlon(43.0667 * N, 141.3500 * E) # Extra NE location
 
 class RoutingSat:
     def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _succeeding_orbit_number, _preceeding_orbit_number, _fore_sat_index, _aft_sat_index):
@@ -325,19 +329,21 @@ class RoutingSat:
                     if 'expected_min_hops' in packet:
                         expected_min_hops = packet['expected_min_hops']
                         expected_max_hops = packet['expected_max_hops']
-                        print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops (expected min: {expected_min_hops}/max: {expected_max_hops}).  Total distance: {int(distance_traveled):,.0f}km (transit time: {(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f} seconds)")
+                        transit_time = (secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']) + (hop_count * 1 / 10000) # add 100 microsecond delay per hop
+                        print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops (expected min: {expected_min_hops}/max: {expected_max_hops}).  Total distance: {int(distance_traveled):,.0f}km (transit time: {transit_time:.2f} seconds)")
                         if csv_output:
-                            string = f"{cur_time_increment},{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f},{expected_min_hops},{expected_max_hops},{packet['prev_hop_list']}\n"
+                            string = f"{cur_time_increment},{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{transit_time:.2f},{expected_min_hops},{expected_max_hops},{packet['prev_hop_list']}\n"
                             csv_file.write(string)
-                    else:
-                        print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f} seconds)")
+                    else: # output without 'expected_min_hops'
+                        transit_time = (secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']) + (hop_count * 1 / 10000) # add 100 microsecond delay per hop
+                        print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination satellite in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {transit_time:.2f} seconds)")
                         if csv_output:
-                            string = f"{cur_time_increment},{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f},{packet['prev_hop_list']}\n"
+                            string = f"{cur_time_increment},{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{transit_time:.2f},{packet['prev_hop_list']}\n"
                             csv_file.write(string)
                     #print(f"Packet traveled through sats: {packet['prev_hop_list']}")
-                    num_packets_received += 1
-                    total_distance_traveled += distance_traveled
-                    total_hop_count += hop_count
+                    num_packets_received += 1 # increment global counter
+                    total_distance_traveled += distance_traveled # increment global counter
+                    total_hop_count += hop_count # increment global counter
                     if draw_static_orbits:
                         draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
                         response = input("Continue drawing plots? (y/[n]): ")
@@ -358,14 +364,14 @@ class RoutingSat:
                     packet['distance_traveled'] += dist.km
                     distance_traveled = packet['distance_traveled']
                     hop_count = len(packet['prev_hop_list'])
-                    print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f} seconds)") # == source: {packet['source_gs']} -- destination: {packet['dest_gs']}")
+                    print(f"\t::distributed_routing_link_state_process_packet_queue:: {self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {int(distance_traveled):,.0f}km (transit time: {transit_time:.2f} seconds)") # == source: {packet['source_gs']} -- destination: {packet['dest_gs']}")
                     if csv_output:
-                        string = f"{cur_time_increment},{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f},{packet['prev_hop_list']}\n"
+                        string = f"{cur_time_increment},{self.sat.model.satnum},{packet['TTL']},{hop_count},{int(distance_traveled)},{transit_time:.2f},{packet['prev_hop_list']}\n"
                         csv_file.write(string)
                     #print(f"Packet traveled through sats: {packet['prev_hop_list']}")
-                    num_packets_received += 1
-                    total_distance_traveled += distance_traveled
-                    total_hop_count += hop_count
+                    num_packets_received += 1 # increment global counter
+                    total_distance_traveled += distance_traveled # increment global counter
+                    total_hop_count += hop_count # increment global counter
                     if draw_static_orbits:
                         if len(packet['prev_hop_list']) > 30:
                             draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
@@ -397,13 +403,17 @@ class RoutingSat:
                     abort_route = False
                     if len(packet['prev_hop_list']) == 0: 
                         prev_hop = None
+                        src_satnum = None
                     else:
                         prev_hop = packet['prev_hop_list'][-1]
                         if 'abort_route' in packet and packet['abort_route'] == True:
                             print(f"::distributed_routing_link_state_process_packet_queue:: Packet reports abort_route = True")
                             abort_route = True
                             packet['abort_route'] = False
-                    target_satnum, set_abort_route = self.find_next_link_state_hop(avail_neigh_routing_sats, packet['dest_gs'], packet['dest_satnum'], prev_hop, abort_route) # find_next_link_state_hop() is function that performs routing selection
+                        src_satnum = packet['prev_hop_list'][0]
+                        if src_satnum == None:
+                            src_satnum = self.sat.model.satnum # if there's no prev_hop_list, then this is the first satellite in the route
+                    target_satnum, set_abort_route = self.find_next_link_state_hop(avail_neigh_routing_sats, packet['dest_gs'], src_satnum, packet['dest_satnum'], prev_hop, abort_route) # find_next_link_state_hop() is function that performs routing selection
                     if set_abort_route:
                         print(f"::distributed_routing_link_state_process_packet_queue:: Next hop selected; Packet reports set_abort_route = True")
                         packet['abort_route'] = True
@@ -482,9 +492,10 @@ class RoutingSat:
                 packet['distance_traveled'] += dist.km
                 distance_traveled = packet['distance_traveled']
                 hop_count = len(packet['prev_hop_list'])
-                print(f"{self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {distance_traveled:,.0f}km (transit time: {(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f} seconds)")
+                transit_time = (secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']) + (hop_count * 1 / 10000) # add 100 microsecond delay per hop
+                print(f"{self.sat.model.satnum}: Packet reached destination in {hop_count} hops.  Total distance: {distance_traveled:,.0f}km (transit time: {transit_time:.2f} seconds)")
                 if csv_output:
-                    string = f"{cur_time_increment},{self.sat.model.satnum}, {hop_count}, {int(distance_traveled)}, {(secs_per_km * int(distance_traveled))+(packet_start_TTL-packet['TTL']):.2f},{packet['prev_hop_list']}\n"
+                    string = f"{cur_time_increment},{self.sat.model.satnum}, {hop_count}, {int(distance_traveled)}, {transit_time:.2f},{packet['prev_hop_list']}\n"
                     csv_file.write(string)
                 if draw_static_orbits:
                     if len(packet['prev_hop_list']) > 30:
@@ -761,48 +772,23 @@ class RoutingSat:
         print(f"\nSpherical position difference of self_sat and sat2:\n\tright ascension: {diff_ra}\n\tdeclination: {diff_dec}\n\tdistance:{diff_distance}")
 
     # calculates satnum of next hop or None if no next hop satellite is available
-    def find_next_link_state_hop(self, avail_neigh_routing_sats, dest_gs, dest_satnum, prev_hop_satnum, abort_route = False):
-        global routing_name
+    def find_next_link_state_hop(self, avail_neigh_routing_sats, dest_gs, src_satnum, dest_satnum, prev_hop_satnum, abort_route = False):
+        global routing_name, interval_comp_value
+        comp_value = 0
         # update current neighboring satellites on each interface
-        #self.update_current_neighbor_sats()
-        
-        #avail_neigh_routing_sats = self.get_list_of_cur_sat_neighbors()
-        """
-        avail_neigh_routing_sats = []
-        if self.fore_int_up and ((self.fore_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_sat_satnum])
-        if self.aft_int_up and ((self.aft_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_sat_satnum])
-        if self.port_int_up and (not self.port_sat_satnum is None) and ((self.port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.port_sat_satnum])
-        if self.starboard_int_up and (not self.starboard_sat_satnum is None) and ((self.starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.starboard_sat_satnum])
-        if self.fore_port_int_up and (not self.fore_port_sat_satnum is None) and ((self.fore_port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_port_sat_satnum])
-        if self.fore_starboard_int_up and (not self.fore_starboard_sat_satnum is None) and ((self.fore_starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.fore_starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.fore_starboard_sat_satnum])
-        if self.aft_port_int_up and (not self.aft_port_sat_satnum is None) and ((self.aft_port_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_port_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_port_sat_satnum])
-        if self.aft_starboard_int_up and (not self.aft_starboard_sat_satnum is None) and ((self.aft_starboard_sat_satnum not in self.neigh_state_dict) or (self.neigh_state_dict[self.aft_starboard_sat_satnum]['connection_up'])):
-            avail_neigh_routing_sats.append(sat_object_list[self.aft_starboard_sat_satnum])
-        """
 
         if len(avail_neigh_routing_sats) == 0:
             print(f"::find_next_link_state_hop:: Sat {self.sat.model.satnum}:  No available neighboring satellites to route to! (received packet from sat {prev_hop_satnum})")
             #self.print_list_of_interface_status()
-            return None
+            return None, False, comp_value
         
         next_hop_satnum = None
         set_abort_route = False
         if routing_name == "Distributed Link State TriCoord":
-            result = self.link_state_routing_method_triCoord(avail_neigh_routing_sats, dest_satnum, prev_hop_satnum, abort_route)
-            if type(result) is int:
-                next_hop_satnum = result
-            elif type(result) is tuple:
-                next_hop_satnum, poor_route = result
-                if poor_route:
-                    print("\t::find_next_link_state_hop:: Received poor_route = True")
-                    set_abort_route = True
+            next_hop_satnum, poor_route, comp_value = self.link_state_routing_method_triCoord(avail_neigh_routing_sats, dest_satnum, prev_hop_satnum, abort_route)
+            if poor_route:
+                print("\t::find_next_link_state_hop:: Received poor_route = True")
+                set_abort_route = True
         elif routing_name == "Distributed Link State TriCoord Alt1":
             result = self.link_state_routing_method_triCoord_alt1(avail_neigh_routing_sats, dest_satnum, prev_hop_satnum, abort_route)
             if type(result) is int:
@@ -817,17 +803,19 @@ class RoutingSat:
             #        next_hop_satnum = None # If next hop is opposing axis down (and next hop isn't the destination), don't route to it
         elif routing_name == "Distributed Link State Bearing":
             dest_r_sat = get_routing_sat_obj_by_satnum(dest_satnum)
-            next_hop_satnum = self.link_state_routing_method_neigh_bearing(avail_neigh_routing_sats, dest_r_sat, prev_hop_satnum)
+            next_hop_satnum, comp_value = self.link_state_routing_method_neigh_bearing(avail_neigh_routing_sats, dest_r_sat, prev_hop_satnum)
         elif routing_name == "Distributed Dijkstar Distance":
-            next_hop_satnum = self.link_state_routing_method_dijkstar(dest_satnum, use_dist=True)
+            next_hop_satnum, comp_value = self.link_state_routing_method_dijkstar(dest_satnum, use_dist=True)
         elif routing_name == "Distributed Dijkstar Hop":
-            next_hop_satnum = self.link_state_routing_method_dijkstar(dest_satnum, use_dist=False)
+            next_hop_satnum, comp_value = self.link_state_routing_method_dijkstar(dest_satnum, use_dist=False)
         elif routing_name == "Distributed Motif":
-            next_hop_satnum = self.link_state_motif_method(avail_neigh_routing_sats, dest_satnum)
+            next_hop_satnum, comp_value = self.link_state_motif_method(avail_neigh_routing_sats, dest_satnum)
         elif routing_name == "Distributed Coin Flip":
-            next_hop_satnum = self.distributed_coin_flip_route (avail_neigh_routing_sats, dest_satnum)
+            next_hop_satnum, comp_value = self.distributed_coin_flip_route (avail_neigh_routing_sats, dest_satnum)
         elif routing_name == "Distributed Naive Basic":
-            next_hop_satnum = self.distributed_naive_route (avail_neigh_routing_sats, dest_satnum)
+            next_hop_satnum, comp_value = self.distributed_naive_route (avail_neigh_routing_sats, dest_satnum)
+        elif routing_name == "Distributed DisCoRoute":
+            next_hop_satnum, comp_value = self.distributed_disCoRoute(avail_neigh_routing_sats, src_satnum, dest_satnum, prev_hop_satnum)
         else:
             print(f"::find_next_link_state_hop:: No known routing name specified.  routing_name: {routing_name}")
 
@@ -842,6 +830,7 @@ class RoutingSat:
         elif next_hop_satnum is self.sat.model.satnum:
             print(f"::find_next_link_state_hop:: next_hop_satnum: {next_hop_satnum} is the same as the current satellite; returning 'None' - current time increment: {cur_time_increment}")
             next_hop_satnum = None
+        interval_comp_value += comp_value
         return next_hop_satnum, set_abort_route
         
         
@@ -878,36 +867,126 @@ class RoutingSat:
         
         # Update zone routing table --> Update is being done by distributed_link_state_routing() only during link_state_update_interval
         #self.motif_method_update_zone_routing_table(avail_neigh_routing_sats)
+
+        comp_value = 0
         
         # get lists of intra_zone_nodes and boundary_nodes
         intra_zone_node_list, boundary_node_list = self.motif_method_get_intra_zone_nodes() # lists contains tuples of (satnum, dist)
+        comp_value += len (boundary_node_list) # just count the size of the boundary node list
         zone_routing_table_satnums = intra_zone_node_list + boundary_node_list
         # if destination is in the same zone, return next hop from zone routing table
+        comp_value += len (zone_routing_table_satnums)
         if dest_satnum in zone_routing_table_satnums:
             print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} in zone routing table")
-            return self.motif_method_get_next_hop_from_zone_routing_table(avail_neigh_routing_sats, dest_satnum)
+            #comp_value += len (avail_neigh_routing_sats)
+            return self.motif_method_get_next_hop_from_zone_routing_table(avail_neigh_routing_sats, dest_satnum), comp_value
         # Otherwise:
         #print(f"::link_state_motif_method:: satnum {self.satnum} does NOT have dest_satnum {dest_satnum} in zone routing table")
         # If destination is not in the same zone, identify which boundary node is closest to the destination satellite
+        #comp_value += len (boundary_node_list)
         min_hop_boundary_satnum = self.motif_method_get_min_hop_boundary_satnum(dest_satnum, boundary_node_list)
         print(f"::link_state_motif_method:: satnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum}")
         if min_hop_boundary_satnum is None: # error in calculating min hop boundary satnum
-            return None
+            return None, comp_value
         # Identify next hop for target_satnum from zone_routing_table
+        #comp_value += len (avail_neigh_routing_sats)
         next_hop = self.motif_method_get_next_hop_from_zone_routing_table(avail_neigh_routing_sats, min_hop_boundary_satnum)
         print(f"\tsatnum {self.satnum} has dest_satnum {dest_satnum} not in zone routing table - routing to boundary satnum {min_hop_boundary_satnum} - next hop is {next_hop}")
-        return next_hop
+        return next_hop, comp_value
         
-    def distributed_disCoRoute (self, available_neigh_routing_sats, dest_satnum):
+    def distributed_disCoRoute (self, available_neigh_routing_sats, src_satnum, dest_satnum, prev_hop_satnum = None):
         #name = "Distributed DisCoRoute"
-        return
+        # Get available neighbors
+        comp_value = 0
+        next_hop_satnum = None
+        inter_orbit_pos_satnum = None
+        inter_orbit_neg_satnum = None
+        intra_orbit_pos_satnum = None
+        intra_orbit_neg_satnum = None
+        for neigh_routing_sat in available_neigh_routing_sats:
+            if neigh_routing_sat.orbit_number == self.orbit_number: # same orbit, so intra-orbit
+                if neigh_routing_sat.sat_index == (self.sat_index + 1)%sats_per_orbit:
+                    intra_orbit_pos_satnum = neigh_routing_sat.sat.model.satnum
+                elif neigh_routing_sat.sat_index == (self.sat_index - 1)%sats_per_orbit:
+                    intra_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
+            else:                                                   # different orbit, so inter-orbit      
+                if neigh_routing_sat.orbit_number == (self.orbit_number + 1)%orbit_cnt:
+                    if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
+                        inter_orbit_pos_satnum = neigh_routing_sat.sat.model.satnum
+                elif neigh_routing_sat.orbit_number == (self.orbit_number - 1)%orbit_cnt:
+                    if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
+                        inter_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
+        comp_value += len (available_neigh_routing_sats)      
+        (inter_orbit_hop_count, inter_orbit_direction_positive), (intra_orbit_hop_count, intra_orbit_direction_positive) = get_inter_intra_min_hop_count (self.sat.model.satnum, dest_satnum) #(src_satnum, dest_satnum)
+        print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} calculated inter_orbit_hop_count: {inter_orbit_hop_count}, inter_orbit_direction_positive: {inter_orbit_direction_positive}, intra_orbit_hop_count: {intra_orbit_hop_count}, intra_orbit_direction_positive: {intra_orbit_direction_positive}")
+        if inter_orbit_hop_count == 0: # we are just going to route intra-orbit
+            print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) inter-orbit hop count == 0; doing intra-orbit hops (V)")
+            if intra_orbit_direction_positive:
+                next_hop_satnum = intra_orbit_pos_satnum
+            else:
+                next_hop_satnum = intra_orbit_neg_satnum
+        elif intra_orbit_hop_count == 0: # we are just going to route inter-orbit
+            print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) intra-orbit hop count == 0; doing inter-orbit hops (H)")
+            if inter_orbit_direction_positive:
+                next_hop_satnum = inter_orbit_pos_satnum
+            else:
+                next_hop_satnum = inter_orbit_neg_satnum
+        elif prev_hop_satnum is not None: # if we just finished an intra-orbit hop, continue intra-orbit (since we already tested whether intra-orbit hop count is 0)
+            print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) continuing intra-orbit hops (V)")
+            if intra_orbit_direction_positive:
+                if prev_hop_satnum == intra_orbit_neg_satnum:
+                    next_hop_satnum = intra_orbit_pos_satnum
+            else:
+                if prev_hop_satnum == intra_orbit_pos_satnum:
+                    next_hop_satnum = intra_orbit_neg_satnum
+        else: # we need to figure out whether route inter-orbit or intra-orbit
+            # calculate whether any inter-orbit hops are needed prior to doing intra-orbit hops
+            remaining_inter_orbit_hop_count = inter_orbit_hop_count
+            preceeding_satnum = self.sat.model.satnum
+            succeeding_satnum = dest_satnum
+            preceeding_inter_orbit_hop_count = 0
+            succeeding_inter_orbit_hop_count = 0
+            comp_value += remaining_inter_orbit_hop_count
+            while (remaining_inter_orbit_hop_count > 0):
+                if inter_orbit_direction_positive:
+                    preceeding_next_hop_satnum, _ = calc_inter_orbit_hop_satnums (preceeding_satnum)
+                    preceeding_sat_lat_diff = abs (get_routing_sat_obj_by_satnum (preceeding_satnum).get_sat_lat_degrees () + get_routing_sat_obj_by_satnum (preceeding_next_hop_satnum).get_sat_lat_degrees ())
+                    _, succeeding_next_hop_satnum = calc_inter_orbit_hop_satnums (succeeding_satnum)
+                    succeeding_sat_lat_diff = abs (get_routing_sat_obj_by_satnum (succeeding_satnum).get_sat_lat_degrees () + get_routing_sat_obj_by_satnum (succeeding_next_hop_satnum).get_sat_lat_degrees ())
+                else:
+                    _, preceeding_next_hop_satnum = calc_inter_orbit_hop_satnums (preceeding_satnum)
+                    preceeding_sat_lat_diff = abs (get_routing_sat_obj_by_satnum (preceeding_satnum).get_sat_lat_degrees () + get_routing_sat_obj_by_satnum (preceeding_next_hop_satnum).get_sat_lat_degrees ())
+                    succeeding_next_hop_satnum, _ = calc_inter_orbit_hop_satnums (succeeding_satnum)
+                    succeeding_sat_lat_diff = abs (get_routing_sat_obj_by_satnum (succeeding_satnum).get_sat_lat_degrees () + get_routing_sat_obj_by_satnum (succeeding_next_hop_satnum).get_sat_lat_degrees ())
+                if preceeding_sat_lat_diff >= succeeding_sat_lat_diff:
+                    preceeding_inter_orbit_hop_count += 1
+                    preceeding_satnum = preceeding_next_hop_satnum
+                else:
+                    succeeding_inter_orbit_hop_count += 1
+                    succeeding_satnum = succeeding_next_hop_satnum
+                remaining_inter_orbit_hop_count -= 1
+            if preceeding_inter_orbit_hop_count > 0:  # there are still more hops to do before we go intra orbit hops
+                print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) doing preceeding inter-orbit hop (H)")
+                if inter_orbit_direction_positive:
+                    next_hop_satnum = inter_orbit_pos_satnum
+                else:
+                    next_hop_satnum = inter_orbit_neg_satnum
+            else: # we are done with preceeding inter-orbit hops, so we need to do intra-orbit hops
+                print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) no preceeding inter-orbit hops; doing intra-orbit hop (V)")
+                if intra_orbit_direction_positive:
+                    next_hop_satnum = intra_orbit_pos_satnum
+                else:
+                    next_hop_satnum = intra_orbit_neg_satnum
+        print (f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) selected next hop of {next_hop_satnum}")
+        return next_hop_satnum, comp_value
     
     # Identifies the minimum number of intra-orbit hops (East-Wes)t based on orbit number and
     # the minimum number of inter-orbit hops (North-South (relatively)) based on orbit index number
     # Randomly selects one of the two paths, so long as there are hops remaining on that path
     def distributed_coin_flip_route (self, available_neigh_routing_sats, dest_satnum):
         #name = ""Distributed Coin Flip""
-                
+        comp_value = 0
+
         # Get available neighbors
         inter_orbit_pos_satnum = None
         inter_orbit_neg_satnum = None
@@ -926,7 +1005,7 @@ class RoutingSat:
                 elif neigh_routing_sat.orbit_number == (self.orbit_number - 1)%orbit_cnt:
                     if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
                         inter_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
-                
+        comp_value += len(available_neigh_routing_sats)
         (inter_orbit_hop_count, inter_orbit_direction_positive), (intra_orbit_hop_count, intra_orbit_direction_positive) = get_inter_intra_min_hop_count (self.sat.model.satnum, dest_satnum)
         if not inter_orbit_direction_positive:
             inter_orbit_symbol = '+'
@@ -992,13 +1071,14 @@ class RoutingSat:
                 print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going inter-orbit negative")
         else:
             print(f"::distributed_coin_flip_route:: No appropriate neighbors available")
-            return None
+            return None, comp_value
         print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) selected next hop {next_hop_satnum} (orbit {get_routing_sat_obj_by_satnum (next_hop_satnum).orbit_number}, index {get_routing_sat_obj_by_satnum (next_hop_satnum).sat_index})")
-        return next_hop_satnum
+        return next_hop_satnum, comp_value
         
     def distributed_naive_route (self, available_neigh_routing_sats, dest_satnum):
         #name = ""Distributed Naive Basic""
-                
+        comp_value = 0
+
         # Get available neighbors
         inter_orbit_pos_satnum = None
         inter_orbit_neg_satnum = None
@@ -1017,7 +1097,7 @@ class RoutingSat:
                 elif neigh_routing_sat.orbit_number == (self.orbit_number - 1)%orbit_cnt:
                     if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
                         inter_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
-                
+        comp_value += len(available_neigh_routing_sats)
         (inter_orbit_hop_count, inter_orbit_direction_positive), (intra_orbit_hop_count, intra_orbit_direction_positive) = get_inter_intra_min_hop_count (self.sat.model.satnum, dest_satnum)
         if not inter_orbit_direction_positive:
             inter_orbit_symbol = '+'
@@ -1062,9 +1142,9 @@ class RoutingSat:
                 print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} going intra-orbit negative")
         else:
             print(f"::distributed_coin_flip_route:: No appropriate neighbors available")
-            return None
+            return None, comp_value
         print(f"\t::distributed_coin_flip_route:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) selected next hop {next_hop_satnum} (orbit {get_routing_sat_obj_by_satnum (next_hop_satnum).orbit_number}, index {get_routing_sat_obj_by_satnum (next_hop_satnum).sat_index})")
-        return next_hop_satnum
+        return next_hop_satnum, comp_value
         
 
     # Requires use of tri_coordinates.py module
@@ -1077,12 +1157,13 @@ class RoutingSat:
         print(f"::link_state_routing_method_triCoord:: Satnum {self.sat.model.satnum}: Received packet for dest satnum {dest_satnum} from prev_hop_satnum {prev_hop_satnum}")
         if abort_route:
             print(f"\t::link_state_routing_method_triCoord:: Satnum {self.sat.model.satnum}: Received abort_route = True")
+        comp_value = 1
         next_hop_satnum = None
         available_neigh_routing_sats_satnums = []
         for neigh_routing_sat in available_neigh_routing_sats:
             if neigh_routing_sat.sat.model.satnum == dest_satnum: # Is destination satellite an available neighbor?
-                return dest_satnum
-            if not self.neigh_state_dict[neigh_routing_sat.sat.model.satnum]['other_connections_avail']: # if neighbor doesn't have any other connections, don't route to it
+                return dest_satnum, False, comp_value
+            if (neigh_routing_sat.sat.model.satnum in self.neigh_state_dict) and (not self.neigh_state_dict[neigh_routing_sat.sat.model.satnum]['other_connections_avail']): # if neighbor doesn't have any other connections, don't route to it
                 continue
             available_neigh_routing_sats_satnums.append(neigh_routing_sat.sat.model.satnum)
 
@@ -1090,17 +1171,17 @@ class RoutingSat:
         num_avail_neigh_routing_sats = len(available_neigh_routing_sats_satnums)
         if num_avail_neigh_routing_sats == 0:
             print(f"\t::link_state_routing_method_triCoord:: satnum {self.satnum} has no available neighbor routing satellites, returning None")
-            return None
+            return None, False, comp_value
         elif num_avail_neigh_routing_sats == 1:
             print(f"\t::link_state_routing_method_triCoord:: satnum {self.satnum} has only one available neighbor routing satellite, returning it ({available_neigh_routing_sats_satnums[0]}) with abort_route = True")
-            return available_neigh_routing_sats_satnums[0], True
+            return available_neigh_routing_sats_satnums[0], True, 1
         elif num_avail_neigh_routing_sats == 2 and prev_hop_satnum in available_neigh_routing_sats_satnums:
             if available_neigh_routing_sats_satnums[0] == prev_hop_satnum:
                 next_hop = available_neigh_routing_sats_satnums[1]
             else:
                 next_hop = available_neigh_routing_sats_satnums[0]
             print(f"\t::link_state_routing_method_triCoord:: satnum {self.satnum} has only two available neighbor routing satellites, returning the one that is not prev_hop_satnum ({next_hop}) with abort_route = True") 
-            return next_hop, True
+            return next_hop, True, comp_value
        
         # get triCoordinates of current and destination satellites, then calculate the difference for each axis
         curr_A, curr_B, curr_C = tri_coordinates.get_sat_ABC(self.sat.model.satnum)
@@ -1121,7 +1202,7 @@ class RoutingSat:
         
             axis_change_needed = True
             if abort_route:
-                pass
+                pass  # on an abort route, so don't try to keep going along axis
             elif prev_hop_diff_A == 0:
                 #inferior_axis = 'A'
                 if B_diff != 0 and C_diff != 0:
@@ -1166,7 +1247,7 @@ class RoutingSat:
                             next_hop_satnum = self.fore_port_sat_satnum
                 if next_hop_satnum is not None and next_hop_satnum in available_neigh_routing_sats_satnums:
                     print(f"\t::link_state_routing_method_triCoord:: satnum {self.satnum} - sending packet along same axis to next_hop_satnum {next_hop_satnum}")
-                    return next_hop_satnum
+                    return next_hop_satnum, False, comp_value
                 print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} could not send packet along same axis; finding new axis")
             else:
                 print(f"\t::link_state_routing_method_triCoord:: satnum {self.satnum} has prev_hop_satnum {prev_hop_satnum} - axis change needed")
@@ -1266,12 +1347,13 @@ class RoutingSat:
                 neigh_axes_dict['logical_NW'] = neigh_routing_sat_satnum
             else:
                 print(f"::link_state_routing_method_triCoord:: Unexpected neighbor coordinates!\n\tCurrent satnum: {self.sat.model.satnum} ({curr_A},{curr_B},{curr_C}), Neighbor satnum: {neigh_routing_sat.sat.model.satnum} ({neigh_A},{neigh_B},{neigh_C})\n\tdiff: ({A_diff},{B_diff},{C_diff})")
-                return None
+                return None, False, comp_value
 
         # Major, Minor, and Inferior axes identified, along with direction
         # Available logical directions identified, along with associated satnums
         # Select highest available priority route that does not return packet to previous hop
         
+        comp_value = len (available_neigh_routing_sats_satnums)
         poor_route = False
 
         # Priority 1: Reduce major_axis along inferior_axis
@@ -1280,7 +1362,7 @@ class RoutingSat:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 1 direction: {priority_direction}, next hop satnum: {next_hop_satnum}, neigh_state_dict: {self.neigh_state_dict}")
-                return next_hop_satnum, poor_route
+                return next_hop_satnum, poor_route, comp_value
 
         # Priority 2: Reduce major_axis along minor_axis
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(major_axis, major_direction, minor_axis)
@@ -1288,7 +1370,7 @@ class RoutingSat:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 2 direction: {priority_direction}, next hop satnum: {next_hop_satnum}, neigh_state_dict: {self.neigh_state_dict}")
-                return next_hop_satnum, poor_route
+                return next_hop_satnum, poor_route, comp_value
         
         # Priority 3: Reduce minor_axis along inferior_axis    
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(minor_axis, minor_direction, inferior_axis)
@@ -1296,7 +1378,7 @@ class RoutingSat:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 3 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}, neigh_state_dict: {self.neigh_state_dict}")
-                return next_hop_satnum, poor_route
+                return next_hop_satnum, poor_route, comp_value
             
         poor_route = True # True indicates that this is poor axis and shouldn't be followed by next hop unless necessary
         print("\t::link_state_routing_method_triCoord:: Selecting lower than Priory 3 route - setting poor_route = True")
@@ -1306,7 +1388,7 @@ class RoutingSat:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 4 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}, neigh_state_dict: {self.neigh_state_dict}")
-                return next_hop_satnum, poor_route 
+                return next_hop_satnum, poor_route, comp_value
 
         # Priority 5: Reduce minor_axis along major_axis
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(minor_axis, minor_direction, major_axis)
@@ -1314,7 +1396,7 @@ class RoutingSat:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 5 direction!: {priority_direction}, next hop satnum: {next_hop_satnum}, neigh_state_dict: {self.neigh_state_dict}")
-                return next_hop_satnum, poor_route 
+                return next_hop_satnum, poor_route, comp_value
 
         # Priority 6: Reduce inferior_axis along major_axis
         priority_direction = tri_coordinates.calc_triCoord_next_hop_logical_direction(inferior_axis, inferior_direction, major_axis)
@@ -1322,13 +1404,13 @@ class RoutingSat:
             next_hop_satnum = neigh_axes_dict[priority_direction]
             if next_hop_satnum != prev_hop_satnum: # and not self.neigh_state_dict[next_hop_satnum]['opposing_axis_down']:
                 print(f"\t::link_state_routing_method_triCoord:: satnum {self.sat.model.satnum} selecting Priority 6 direction: {priority_direction}, next hop satnum: {next_hop_satnum}, neigh_state_dict: {self.neigh_state_dict}")
-                return next_hop_satnum, poor_route 
+                return next_hop_satnum, poor_route, comp_value
         
         if prev_hop_satnum in available_neigh_routing_sats_satnums:
             next_hop_satnum = prev_hop_satnum
             print(f"\t::link_state_routing_method_triCoord:: Sat {self.sat.model.satnum}: No other available links; Returning packet to previous hop: {prev_hop_satnum} (available_neigh_routing_sats_satnums: {available_neigh_routing_sats_satnums})!")
             print(f"\tSat {self.sat.model.satnum} neigh_state_dict: {self.neigh_state_dict}; prev_hop_satnum: {prev_hop_satnum} neigh_state_dict: {get_routing_sat_obj_by_satnum(prev_hop_satnum).neigh_state_dict})")
-            return next_hop_satnum, poor_route
+            return next_hop_satnum, poor_route, comp_value
 
         print(f"::link_state_routing_method_triCoord:: Sat {self.sat.model.satnum}: Unable to find next hop!")
         print(f"\tneigh_axes_dict: {neigh_axes_dict}\n\tLength available_neigh_routing_sats: {len(available_neigh_routing_sats)}")
@@ -1337,7 +1419,7 @@ class RoutingSat:
         print(f"\tLength of available_neigh_routing_sats_satnums: {len(available_neigh_routing_sats_satnums)}")
         for neigh_sat_satnum in available_neigh_routing_sats_satnums:
             print(f"\t{neigh_sat_satnum}")
-        return None
+        return None, False, comp_value
         # This packet should be rolled over to the next time interval...
 
     # First alternative triCoord routing method
@@ -1398,6 +1480,7 @@ class RoutingSat:
     # Must have neighbor stats updated prior to calling!
     def link_state_routing_method_neigh_bearing(self, avail_neigh_routing_sats, dest_sat, prev_hop_satnum = None):
         #name = "Distributed Link State Bearing"
+        comp_value = 0
         # now find which of the available neighbor routing sats is closest to the destination gs
         self.heading = get_heading_by_satnum_degrees(self.sat.model.satnum)
         lowest_dist_metric = float('inf')
@@ -1409,6 +1492,7 @@ class RoutingSat:
         #dist_to_dest_gs = dist.km
         #print(f"::link_state_routing_method_neigh_bearing::  Sat {self.sat.model.satnum} Distance to dest gs: {dist_to_dest_gs:,.0f} km")
         # end testing
+        comp_value += len (avail_neigh_routing_sats)
         for neigh_routing_sat in avail_neigh_routing_sats:
             dist_metric = self.calc_link_state_bearing_dist_metric(neigh_routing_sat, dest_bearing, do_qos, prev_hop_satnum)
             if dist_metric < lowest_dist_metric:
@@ -1416,9 +1500,9 @@ class RoutingSat:
                 lowest_neigh_routing_sat = neigh_routing_sat
         if lowest_neigh_routing_sat is None:
             print("::link_state_routing_method_neigh_bearing::  No next hop sat could be calculated")
-            return None
+            return None, comp_value
         #print(f"::link_state_routing_method_neigh_bearing::  Sat {self.sat.model.satnum} Selected next hop satnum: {lowest_neigh_routing_sat.sat.model.satnum}")
-        return lowest_neigh_routing_sat.sat.model.satnum
+        return lowest_neigh_routing_sat.sat.model.satnum, comp_value
 
     # Calculate distance metric for link state routing based on bearing (lowest is best)
     def calc_bearing_dist_metric(self, neigh_routing_sat, dest_bearing, prev_hop_satnum = None):
@@ -1939,12 +2023,15 @@ class RoutingSat:
         from dijkstar import Graph, find_path
         global cur_time_increment
         next_hop_satnum = None
-
+        edge_count = 0
+        vertice_count = 0
         #print(f"::link_state_routing_method_dijkstar:: Building graph for satnum: {self.sat.model.satnum}, time increment {cur_time_increment}")
         graph = Graph()
         for target_satnum in self.constellation_link_state_dict.keys():
+            vertice_count += 1
             known_neighbors_dict, _ = self.constellation_link_state_dict[target_satnum]
             for neigh_satnum in known_neighbors_dict.keys():
+                edge_count += 1
                 if use_dist:
                     graph.add_edge(target_satnum, neigh_satnum, known_neighbors_dict[neigh_satnum]['distance'])
                 else:
@@ -1957,8 +2044,8 @@ class RoutingSat:
         except Exception as e:
             print(f"::link_state_routing_method_dijkstar:: Sat {self.sat.model.satnum}; Path not found to dest satnum {dest_satnum}.\n\texception: {e}")
             print(f"\tList of current neighbor satnums: {self.get_list_of_cur_neighbor_satnums()}")
-        
-        return next_hop_satnum
+        comp_value = (edge_count + vertice_count) * math.log(vertice_count) # Dijkstra's algorithm complexity is O((E+V)logV)
+        return next_hop_satnum, comp_value
     
     # TODO: COME UP WITH METHOD TO NOT UPDATE TABLE UNLESS NECESSARY
     # TODO:  IDENTIFY WHEN IT WOULD BE NECESSARY TO UPDATE TABLE!
@@ -2053,22 +2140,6 @@ class RoutingSat:
         if len(boundary_satnum_list) == 0:
             print(f"::motif_method_get_intra_zone_nodes:: ERROR: Sat {self.sat.model.satnum} boundary_satnum_list is empty. ZRT: {self.zone_routing_table}")
         return intra_zone_satnum_list, boundary_satnum_list
-        """
-        neigh_satnum_list = self.get_list_of_cur_neighbor_satnums()
-        boundary_satnum_dist_list = []
-        intra_zone_satnum_dist_list = []
-        for neigh_satnum in neigh_satnum_list:
-            dist, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, neigh_satnum)
-            intra_zone_satnum_dist_list.append((neigh_satnum, dist))
-            neigh_sat_object = sat_object_list[neigh_satnum]
-            neigh_neigh_satnum_list = neigh_sat_object.get_list_of_cur_neighbor_satnums()
-            for neigh_neigh_satnum in neigh_neigh_satnum_list:
-                if neigh_neigh_satnum not in neigh_satnum_list:
-                    dist, _ = get_sat_distance_and_rate_by_satnum(self.sat.model.satnum, neigh_neigh_satnum)
-                    boundary_satnum_dist_list.append((neigh_neigh_satnum, dist))
-            
-        return intra_zone_satnum_dist_list, boundary_satnum_dist_list
-        """
 
     def motif_method_get_min_hop_boundary_satnum(self, target_satnum, boundary_node_list):
         #print(f"::motif_method_get_min_hop_boundary_satnum:: Sat: {self.sat.model.satnum}; target_satnum: {target_satnum}; boundary_node_list: {boundary_node_list}")
@@ -2557,7 +2628,7 @@ def apply_disruption_schedule():
         csv_disruption.write(string)
 
 def increment_time():
-    global cur_time, cur_time_next, time_scale, cur_time_increment, num_packets_dropped, prev_incr_num_packets_dropped, num_max_TTL_packets_dropped
+    global cur_time, cur_time_next, time_scale, cur_time_increment, num_packets_dropped, prev_incr_num_packets_dropped, num_max_TTL_packets_dropped, interval_comp_value
     python_t = cur_time.utc_datetime()
     new_python_time = python_t + timedelta(seconds = time_interval)
     cur_time = time_scale.utc(new_python_time.year, new_python_time.month, new_python_time.day, new_python_time.hour, new_python_time.minute, new_python_time.second)
@@ -2588,11 +2659,15 @@ def increment_time():
             for packet in drop_packet_list:
                 r_sat.packet_qu.remove(packet)
             drop_packet_list.clear()
-    cur_time_increment += 1
+    
     cur_inc_num_packets_dropped = num_packets_dropped - prev_incr_num_packets_dropped
-    print(f"::increment_time:: Packets dropped during increment {cur_time_increment-1}: {cur_inc_num_packets_dropped}")
+    print(f"::increment_time:: Packets dropped during increment {cur_time_increment}: {cur_inc_num_packets_dropped}")
+    print(f"::increment_time:: Computational overhead during increment {cur_time_increment}: {interval_comp_value}")
     if csv_output and cur_time_increment >= starting_time_increment:
-        csv_packet_loss.write(f"{cur_time_increment-1}, {cur_inc_num_packets_dropped}\n")
+        csv_packet_loss.write(f"{cur_time_increment}, {cur_inc_num_packets_dropped}\n")
+        csv_comp_value.write(f"{cur_time_increment}, {interval_comp_value}\n")
+    interval_comp_value = 0
+    cur_time_increment += 1
     prev_incr_num_packets_dropped += cur_inc_num_packets_dropped
 
     #print(f"::increment_time:: Current time incremented to: {cur_time.utc_jpl()}, time increment: {cur_time_increment}, scheduled time intervals: {num_time_intervals}")
@@ -3054,6 +3129,13 @@ def test_circumnavigate():
     
 
     draw_static_plot(test_list, f"Go East, Northx2, West - {len(test_list)} sats")
+
+def calc_inter_orbit_hop_satnums (curr_satnum):
+    current_orbit_number = get_routing_sat_obj_by_satnum (curr_satnum).orbit_number
+    current_orbit_index = get_routing_sat_obj_by_satnum (curr_satnum).sat_index
+    inter_orbit_pos_hop_satnum = ((current_orbit_number + 1) % orbit_cnt) * sats_per_orbit + current_orbit_index
+    inter_orbit_neg_hop_satnum = ((current_orbit_number - 1) % orbit_cnt) * sats_per_orbit + current_orbit_index
+    return inter_orbit_pos_hop_satnum, inter_orbit_neg_hop_satnum
 
 def get_inter_intra_min_hop_count (curr_satnum, dest_satnum):
     current_orbit_number = get_routing_sat_obj_by_satnum (curr_satnum).orbit_number
@@ -3875,7 +3957,7 @@ def distributed_link_state_routing():
     if csv_output:
         if routing_name == "Distributed Link State TriCoord" or routing_name == "Distributed Link State TriCoord Alt1":
             string = f"current_increment,satnum,packet_ttl,num_hops,distance_traveled,transit_time,expected_min_hops,expected_max_hops,prev_hop_list"
-        elif (routing_name == "Distributed Link State Bearing") or (routing_name == "Distributed Dijkstar Distance") or (routing_name == "Distributed Dijkstar Hop") or (routing_name == "Distributed Motif") or (routing_name == "Distributed Coin Flip") or (routing_name == "Distributed Naive Basic"):
+        elif (routing_name == "Distributed Link State Bearing") or (routing_name == "Distributed Dijkstar Distance") or (routing_name == "Distributed Dijkstar Hop") or (routing_name == "Distributed Motif") or (routing_name == "Distributed Coin Flip") or (routing_name == "Distributed Naive Basic") or (routing_name == "Distributed DisCoRoute"):
             string = f"current_increment,satnum,packet_ttl,num_hops,distance_traveled,transit_time,prev_hop_list"
         csv_file.write(string + "\n")
     max_time_inverals = int((num_time_intervals + starting_time_increment) * 1.5) # allow some additional time to process any packets that may have been delayed
@@ -4272,6 +4354,10 @@ def dump_packet_schedule_to_file():
             build_NS_old_world_equator_packet_schedule()
         elif packet_schedule_method == 'NS_new_world':
             build_NS_new_world_equator_packet_schedule()
+        elif packet_schedule_method == 'SE_to_NW':
+            build_SE_to_NW_packet_schedule()
+        elif packet_schedule_method == "NE_to_SW":
+            build_NE_to_SW_packet_schedule()
         else:
             print(f"Unkown packet schedule method specified: {packet_schedule_method}")
             exit()
@@ -4340,6 +4426,14 @@ def build_NS_old_world_equator_packet_schedule():
 def build_NS_new_world_equator_packet_schedule():
     # Using Rio Gallegos and Calgary
     city_list = [Rio_Gallegos, Calgary]
+    build_2_city_packet_schedule(city_list)
+
+def build_SE_to_NW_packet_schedule():
+    city_list = [Sydney, Lisbon]
+    build_2_city_packet_schedule(city_list)
+
+def build_NE_to_SW_packet_schedule():
+    city_list = [Sapporo, Buenos_Aires]
     build_2_city_packet_schedule(city_list)
 
 def build_2_city_packet_schedule (city_list):
@@ -4418,7 +4512,7 @@ def build_packet_schedule():
 
     global packet_schedule
 
-    for interval in range(num_time_intervals):
+    for interval in range(starting_time_increment, starting_time_increment + num_time_intervals):
         for packet_cnt in range(packets_generated_per_interval):
             if packet_cnt == 0:
                 packet_schedule[interval] = []
@@ -4466,7 +4560,7 @@ def alt_build_packet_schedule():
 
     global packet_schedule
 
-    for interval in range(num_time_intervals):
+    for interval in range(starting_time_increment, starting_time_increment + num_time_intervals):
         for packet_cnt in range(packets_generated_per_interval):
             if packet_cnt == 0:
                 packet_schedule[interval] = []
@@ -4514,7 +4608,7 @@ def static_build_packet_schedule():
 
     global packet_schedule
 
-    for interval in range(num_time_intervals):
+    for interval in range(starting_time_increment, starting_time_increment + num_time_intervals):
         for packet_cnt in range(packets_generated_per_interval):
             if packet_cnt == 0:
                 packet_schedule[interval] = []
@@ -4677,6 +4771,52 @@ def sat_connectivity_plot_test (draw_plot = False):
         else:
             print_connectivity_stats ()
         increment_time()
+
+
+def overhead_sat_test ():
+    global csv_file
+    print("::::: OVERHEAD SAT TEST :::::")
+    if csv_output:
+        string = "cur_time_increment, sat_overhead_src, sat_overhead_dest\n"
+        csv_file.write(string)
+    max_time_intervals = int (num_time_intervals + starting_time_increment)
+    always_sat_overhead = True
+    no_overhead_sat_increment_list = []
+
+    for _ in range(max_time_intervals):
+        print(f"::overhead_sat_test:: Time intervals: {cur_time_increment} of {max_time_intervals}")
+        if cur_time_increment in packet_schedule:
+            packet_send_list = packet_schedule[cur_time_increment]
+            print(f"::overhead_sat_test:: {len(packet_send_list)} scheduled packets from ground terminals")
+            for packet in packet_send_list:
+                src, dest = packet
+                sat_overhead_src = False
+                sat_overhead_dest = False
+                for routing_sat in sat_object_list:
+                    if routing_sat.is_overhead_of (src):
+                        sat_overhead_src = True
+                    if routing_sat.is_overhead_of (dest):
+                        sat_overhead_dest = True
+                    if sat_overhead_src and sat_overhead_dest:
+                        break
+                if (not sat_overhead_src) or (not sat_overhead_dest):
+                    print(f"::overhead_sat_test:: Time increment {cur_time_increment}: No sat overhead source or destination!")
+                    always_sat_overhead = False
+                    if cur_time_increment not in no_overhead_sat_increment_list:
+                        no_overhead_sat_increment_list.append(cur_time_increment)
+                else:
+                    print(f"::overhead_sat_test:: Time increment {cur_time_increment}: Sat overhead both source and destination!")
+                if csv_output:
+                    csv_file.write(f"{cur_time_increment}, {sat_overhead_src}, {sat_overhead_dest}\n")
+            del packet_schedule[cur_time_increment]
+
+        increment_time ()
+
+    if (always_sat_overhead):
+        print(f"::overhead_sat_test:: All packets had a satellite overhead source and destination!")
+    else:
+        print(f"::overhead_sat_test:: Not all packets had a satellite overhead source and destination!")
+        print(f"::overhead_sat_test:: Time increments with no satellite overhead source or destination: {no_overhead_sat_increment_list}")
 # ::::::: END TESTING FUNCTIONS :::::::
 
 def print_configured_options():
@@ -4853,7 +4993,7 @@ def main ():
 
     if csv_output:
         print(f"Opening csv file with base name: {csv_output}")
-        global csv_file, csv_writer, csv_ttl, csv_congestion, csv_max_hop, csv_disruption, csv_packet_loss, csv_rollover
+        global csv_file, csv_writer, csv_ttl, csv_congestion, csv_max_hop, csv_disruption, csv_packet_loss, csv_rollover, csv_comp_value
         csv_file = open(csv_output, 'w')
         csv_ttl = open(csv_output+'_ttl.csv', 'w')
         csv_ttl.write("time_increment, satnum, sat_latitude, sat_longitude, prev_hop_list\n")
@@ -4867,9 +5007,38 @@ def main ():
         csv_packet_loss.write("time_increment, packet_loss_count\n")
         csv_rollover = open(csv_output+'_rollover.csv', 'w')
         csv_rollover.write("time_increment, satnum, sat_lat, sat_lon, neigh_state_dict, packet_TTL, prev_hop_list\n")
+        csv_comp_value = open(csv_output+'_comp_value.csv', 'w')
+        csv_comp_value.write("time_increment, comp_value, network_value\n")
         
     if starting_time_increment != 0:
         advance_start_time ()
+
+    # ---------- SCHEDULING ------------
+
+    # build a schedule of packets to send
+    if packet_schedule_method == 'static':
+        static_build_packet_schedule()
+    elif packet_schedule_method == 'random':
+        build_packet_schedule()
+    elif packet_schedule_method == 'alt_random':
+        alt_build_packet_schedule()
+    elif packet_schedule_method == 'file':
+        load_packet_schedule_from_file()
+    elif packet_schedule_method == 'EW_high_latitude':
+        build_EW_high_latitude_packet_schedule()
+    elif packet_schedule_method == 'EW_equator':
+        build_EW_equator_packet_schedule()
+    elif packet_schedule_method == 'NS_old_world':
+        build_NS_old_world_equator_packet_schedule()
+    elif packet_schedule_method == 'NS_new_world':
+        build_NS_new_world_equator_packet_schedule()
+    elif packet_schedule_method == 'SE_to_NW':
+        build_SE_to_NW_packet_schedule()
+    elif packet_schedule_method == "NE_to_SW":
+        build_NE_to_SW_packet_schedule()
+    else:
+        print(f"Unknown packet schedule method specified: {packet_schedule_method}")
+        exit()
 
     # ---------- TESTING ------------
     
@@ -4896,6 +5065,8 @@ def main ():
             sat_connectivity_plot_test(True)
         elif test_name == "Print Connectivity Stats":
             sat_connectivity_plot_test(False)
+        elif test_name == "Test Overhead Sats":
+            overhead_sat_test ()
         else:
             print(f"Unknown test name specified: {test_name}")
         if csv_output:
@@ -4913,30 +5084,11 @@ def main ():
             print(f"Closed csv file: {csv_output+'_packet_loss.csv'}")
             csv_rollover.close()
             print(f"Closed csv file: {csv_output+'_rollover.csv'}")
+            csv_comp_value.close()
+            print(f"Closed csv file: {csv_output+'_comp_value.csv'}")
         exit()
     
-    # ---------- SCHEDULING ------------
-
-    # build a schedule of packets to send
-    if packet_schedule_method == 'static':
-        static_build_packet_schedule()
-    elif packet_schedule_method == 'random':
-        build_packet_schedule()
-    elif packet_schedule_method == 'alt_random':
-        alt_build_packet_schedule()
-    elif packet_schedule_method == 'file':
-        load_packet_schedule_from_file()
-    elif packet_schedule_method == 'EW_high_latitude':
-        build_EW_high_latitude_packet_schedule()
-    elif packet_schedule_method == 'EW_equator':
-        build_EW_equator_packet_schedule()
-    elif packet_schedule_method == 'NS_old_world':
-        build_NS_old_world_equator_packet_schedule()
-    elif packet_schedule_method == 'NS_new_world':
-        build_NS_new_world_equator_packet_schedule()
-    else:
-        print(f"Unknown packet schedule method specified: {packet_schedule_method}")
-        exit()
+    
     
     # ---------- DISRUPTING ------------
 
@@ -4966,7 +5118,7 @@ def main ():
         directed_dijkstar_hop_routing()
     elif routing_name == "Directed Dijkstar Distance":
         directed_dijkstar_distance_routing()
-    elif (routing_name == "Distributed Link State Bearing") or (routing_name == "Distributed Link State TriCoord") or (routing_name == "Distributed Link State TriCoord Alt1") or (routing_name == "Distributed Dijkstar Distance") or (routing_name == "Distributed Dijkstar Hop") or (routing_name == "Distributed Motif") or (routing_name == "Distributed Coin Flip") or (routing_name == "Distributed Naive Basic"):
+    elif (routing_name == "Distributed Link State Bearing") or (routing_name == "Distributed Link State TriCoord") or (routing_name == "Distributed Link State TriCoord Alt1") or (routing_name == "Distributed Dijkstar Distance") or (routing_name == "Distributed Dijkstar Hop") or (routing_name == "Distributed Motif") or (routing_name == "Distributed Coin Flip") or (routing_name == "Distributed Naive Basic") or (routing_name == "Distributed DisCoRoute"):
         distributed_link_state_routing()
     else:
         print(f"\n::main:: NO KNOWN ROUTING NAME SPECIFIED!!!  routing_name: {routing_name}")
@@ -4995,6 +5147,8 @@ def main ():
         print(f"Closed csv file: {csv_output+'_packet_loss.csv'}")
         csv_rollover.close()
         print(f"Closed csv file: {csv_output+'_rollover.csv'}")
+        csv_comp_value.close()
+        print(f"Closed csv file: {csv_output+'_comp_value.csv'}")
     exit ()
 
     
