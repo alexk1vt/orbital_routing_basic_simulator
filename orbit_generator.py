@@ -21,10 +21,14 @@ import getopt # for command line arguments
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
+from mpl_toolkits.basemap import Basemap
 from matplotlib.animation import FuncAnimation
 
 # CSV
 import csv
+
+# repeatable random number generation
+import hashlib
 
 # custom modules
 import tri_coordinates
@@ -39,7 +43,7 @@ plot_dropped_packets = False
 do_disruptions = False
 max_disruptions_per_time_interval = 5
 disruption_schedule_method = "random" # "random", "static", "percent", "file"
-disruption_schedule_method_options = ["random", "static", "percent", "file", "type_I"]
+disruption_schedule_method_options = ["random", "static", "percent", "file", "type_I", "type_II", "type_III", "type_IV", "type_V"]
 disruption_options_string = ""
 do_qos = False # QoS things like congestion control
 packet_schedule_method = "static" # "random", "alt_random", "static", "file"
@@ -47,7 +51,7 @@ packet_schedule_method_options = ["random", "alt_random", "static", "file", "EW_
 test_point_to_point = False # routes repeatedly between two static locations over specified time intervals -- MUST BE SET FOR 'STATIC' PACKET SCHEDULE METHOD
 routing_name = "Distributed Link State TriCoord" # options: "Directed Dijkstra Hop", "Directed Dijkstra Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif", "Distributed Coin Flip", "Distributed DisCoRoute"
 routing_name_options = ["Directed Dijkstra Hop", "Directed Dijkstra Distance", "Directed Dijkstar Hop", "Directed Dijkstar Distance", "Distributed Link State Bearing", "Distributed Link State TriCoord", "Distributed Link State TriCoord Alt1", "Distributed Dijkstar Distance", "Distributed Dijkstar Hop", "Distributed Motif", "Distributed Coin Flip", "Distributed Naive Basic", "Distributed DisCoRoute"]
-testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time", "Dump Packet Schedule to File", "Load Packet Schedule From File", "Dump Disruption Schedule to File", "Load Disruption Schedule From File", "Draw Connectivity Plot", "Print Connectivity Stats", "Test Overhead Sats"]
+testing_name_options = ["None","Print Sat Neighbors Over Time", "Print Sat Neighbor Bearings Over Time", "Dump Packet Schedule to File", "Load Packet Schedule From File", "Dump Disruption Schedule to File", "Load Disruption Schedule From File", "Draw Connectivity Plot", "Print Connectivity Stats", "Test Overhead Sats", "Print Sat Neighbor Distance Over Time"]
 csv_output = None
 
 # Orbit characteristics
@@ -115,8 +119,8 @@ disrupted_regions_dict = {} # a dictionary with GeographicPosition objects as ke
 #g_lat_range = 1 # satellites to E/W can fall within +- this value -- currently unused
 lateral_antenna_range = 30 #30  # in degrees.  Lateral satellite bearings can fall +- lateral_antenna_range / 2
 # lateral antenna interface bearings
-port_interface_bearing = 70 #90
-starboard_interface_bearing = 250 #270
+port_interface_bearing = 24#47#70 #90
+starboard_interface_bearing = 204#227#250 #270
 fore_port_interface_bearing = 22 #25 - was missing satellites at bearing 7.99 - 9.77
 fore_starboard_interface_bearing = 338 #335 - was missing satellites at bearing 350.00 - 352.02
 aft_port_interface_bearing = 158 #155 - was missing satellites at bearing 170.32 - 171.51
@@ -212,7 +216,9 @@ Cape_Town = wgs84.latlon(33.9249 * S, 18.4241 * E) # Extra
 Cairo = wgs84.latlon(30.0444 * N, 31.2357 * E) # Extra
 Nairobi = wgs84.latlon(1.2921 * S, 36.8219 * E) # Extra
 Rio_Gallegos = wgs84.latlon(51.6230 * S, 69.2168 * W) # Extra
+Comodoro_Rivadavia = wgs84.latlon(45.8641 * S, 67.4966 * W) # Extra
 Calgary = wgs84.latlon(51.0486 * N, 114.0708 * W) # Extra
+Montreal = wgs84.latlon(45.5017 * N, 73.5673 * W) # Extra
 Ottawa = wgs84.latlon(45.4215 * N, 75.6972 * W) # Extra
 Seattle = wgs84.latlon(47.6062 * N, 122.3321 * W) # Extra EW_high_latitude
 Krakow = wgs84.latlon(50.0647 * N, 19.9450 * E) # Extra EW_high_latitude
@@ -242,6 +248,9 @@ Bukittinggi = wgs84.latlon(0.3000 * S, 100.3667 * E) # Disruption location EW_eq
 Baraawe = wgs84.latlon(1.1167 * N, 44.0500 * E) # Disruption location EW_equator disruption
 Lisbon = wgs84.latlon(38.7167 * N, 9.1333 * W) # Extra NW location
 Sapporo = wgs84.latlon(43.0667 * N, 141.3500 * E) # Extra NE location
+Mitu = wgs84.latlon(1.2500 * N, 70.2333 * W) # Disruption Location for New NS_Americas
+Malargue = wgs84.latlon(35.4667 * S, 69.5833 * W) # Disruption Location for New NS_Americas
+Off_Norfolk = wgs84.latlon(36.13 * N, 69.58 * W) # Disruption Location for New NS_Americas
 
 class RoutingSat:
     def __init__(self, _sat, _satnum, _orbit_number, _sat_index, _succeeding_orbit_number, _preceeding_orbit_number, _fore_sat_index, _aft_sat_index):
@@ -595,7 +604,7 @@ class RoutingSat:
 
         # find min/max satnums for target orbit
         min_satnum = neighboring_orbit_num * sats_per_orbit
-        max_satnum = min_satnum + sats_per_orbit
+        max_satnum = min_satnum + sats_per_orbit -1
 
         # loop through neighboring orbit satellites and find which are within range of each interface
         tentative_satnum_list = []
@@ -780,7 +789,7 @@ class RoutingSat:
         if len(avail_neigh_routing_sats) == 0:
             print(f"::find_next_link_state_hop:: Sat {self.sat.model.satnum}:  No available neighboring satellites to route to! (received packet from sat {prev_hop_satnum})")
             #self.print_list_of_interface_status()
-            return None, False, comp_value
+            return None, False
         
         next_hop_satnum = None
         set_abort_route = False
@@ -903,6 +912,7 @@ class RoutingSat:
         inter_orbit_neg_satnum = None
         intra_orbit_pos_satnum = None
         intra_orbit_neg_satnum = None
+        cur_sat_lat = self.get_sat_lat_degrees ()
         for neigh_routing_sat in available_neigh_routing_sats:
             if neigh_routing_sat.orbit_number == self.orbit_number: # same orbit, so intra-orbit
                 if neigh_routing_sat.sat_index == (self.sat_index + 1)%sats_per_orbit:
@@ -916,30 +926,40 @@ class RoutingSat:
                 elif neigh_routing_sat.orbit_number == (self.orbit_number - 1)%orbit_cnt:
                     if neigh_routing_sat.sat_index == self.sat_index: # want to match sat index values
                         inter_orbit_neg_satnum = neigh_routing_sat.sat.model.satnum
-        comp_value += len (available_neigh_routing_sats)      
+        comp_value += len (available_neigh_routing_sats)
         (inter_orbit_hop_count, inter_orbit_direction_positive), (intra_orbit_hop_count, intra_orbit_direction_positive) = get_inter_intra_min_hop_count (self.sat.model.satnum, dest_satnum) #(src_satnum, dest_satnum)
-        print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} calculated inter_orbit_hop_count: {inter_orbit_hop_count}, inter_orbit_direction_positive: {inter_orbit_direction_positive}, intra_orbit_hop_count: {intra_orbit_hop_count}, intra_orbit_direction_positive: {intra_orbit_direction_positive}")
-        if inter_orbit_hop_count == 0: # we are just going to route intra-orbit
-            print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) inter-orbit hop count == 0; doing intra-orbit hops (V)")
+        print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} current orbit number {self.orbit_number}, current sat index {self.sat_index}; destination satnum {dest_satnum} orbit number {get_routing_sat_obj_by_satnum (dest_satnum).orbit_number}, sat index {get_routing_sat_obj_by_satnum (dest_satnum).sat_index}")
+        print(f"\t::distributed_disCoRoute:: satnum {self.sat.model.satnum} calculated inter_orbit_hop_count: {inter_orbit_hop_count}, inter_orbit_direction_positive: {inter_orbit_direction_positive}, intra_orbit_hop_count: {intra_orbit_hop_count}, intra_orbit_direction_positive: {intra_orbit_direction_positive}")
+        print(f"\t::disributed_disCoRoute:: satnum {self.sat.model.satnum} has inter_orbit_pos_satnum: {inter_orbit_pos_satnum}, inter_orbit_neg_satnum: {inter_orbit_neg_satnum}, intra_orbit_pos_satnum: {intra_orbit_pos_satnum}, intra_orbit_neg_satnum: {intra_orbit_neg_satnum}")
+        # Do some preliminary checks to see if route calculation is not needed
+        if inter_orbit_hop_count == 0: # packet is in target orbit, we are just going to route intra-orbit
+            print(f"\t::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) inter-orbit hop count == 0; doing intra-orbit hops (V)")
             if intra_orbit_direction_positive:
                 next_hop_satnum = intra_orbit_pos_satnum
             else:
                 next_hop_satnum = intra_orbit_neg_satnum
-        elif intra_orbit_hop_count == 0: # we are just going to route inter-orbit
-            print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) intra-orbit hop count == 0; doing inter-orbit hops (H)")
+        elif intra_orbit_hop_count == 0: # packet is aligned with orbit index, we are just going to route inter-orbit
+            print(f"\t::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) intra-orbit hop count == 0; doing inter-orbit hops (H)")
             if inter_orbit_direction_positive:
                 next_hop_satnum = inter_orbit_pos_satnum
             else:
                 next_hop_satnum = inter_orbit_neg_satnum
-        elif prev_hop_satnum is not None: # if we just finished an intra-orbit hop, continue intra-orbit (since we already tested whether intra-orbit hop count is 0)
-            print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) continuing intra-orbit hops (V)")
+        #elif ((30 < abs(cur_sat_lat)) and (abs(cur_sat_lat) < 40)) and ((cur_sat_lat > 0 and intra_orbit_direction_positive) or (cur_sat_lat < 0 and not intra_orbit_direction_positive)): # if there are remaining inter-orbit hops, we need to do them if we are approaching the poles
+        elif ((30 < abs(cur_sat_lat)) and (abs(cur_sat_lat) < 40)) and (): # HOW CAN I TELL IF WE ARE MOVING INTO LATITUDE EXTREMES OR OUT OF THEM??
+            print(f"\t::disributed_disCoRoute:: satnum {self.sat.model.satnum} has latitude of {self.get_sat_lat_degrees ():.0f}; doing inter-orbit hops (H)")
+            if inter_orbit_direction_positive:
+                next_hop_satnum = inter_orbit_pos_satnum
+            else:
+                next_hop_satnum = inter_orbit_neg_satnum
+        elif (prev_hop_satnum is not None) and (get_routing_sat_obj_by_satnum (prev_hop_satnum).orbit_number == self.orbit_number): # if we just finished an intra-orbit hop, continue intra-orbit (since we already tested whether intra-orbit hop count is 0)
+            print(f"\t::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) continuing intra-orbit hops (V)")
             if intra_orbit_direction_positive:
                 if prev_hop_satnum == intra_orbit_neg_satnum:
                     next_hop_satnum = intra_orbit_pos_satnum
             else:
                 if prev_hop_satnum == intra_orbit_pos_satnum:
                     next_hop_satnum = intra_orbit_neg_satnum
-        else: # we need to figure out whether route inter-orbit or intra-orbit
+        if next_hop_satnum is None: # we need to figure out whether route inter-orbit or intra-orbit
             # calculate whether any inter-orbit hops are needed prior to doing intra-orbit hops
             remaining_inter_orbit_hop_count = inter_orbit_hop_count
             preceeding_satnum = self.sat.model.satnum
@@ -966,18 +986,18 @@ class RoutingSat:
                     succeeding_satnum = succeeding_next_hop_satnum
                 remaining_inter_orbit_hop_count -= 1
             if preceeding_inter_orbit_hop_count > 0:  # there are still more hops to do before we go intra orbit hops
-                print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) doing preceeding inter-orbit hop (H)")
+                print(f"\t::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) doing preceeding inter-orbit hop (H)")
                 if inter_orbit_direction_positive:
                     next_hop_satnum = inter_orbit_pos_satnum
                 else:
                     next_hop_satnum = inter_orbit_neg_satnum
             else: # we are done with preceeding inter-orbit hops, so we need to do intra-orbit hops
-                print(f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) no preceeding inter-orbit hops; doing intra-orbit hop (V)")
+                print(f"\t::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) no preceeding inter-orbit hops needed; doing intra-orbit hop (V)")
                 if intra_orbit_direction_positive:
                     next_hop_satnum = intra_orbit_pos_satnum
                 else:
                     next_hop_satnum = intra_orbit_neg_satnum
-        print (f"::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) selected next hop of {next_hop_satnum}")
+        print (f"\t::distributed_disCoRoute:: satnum {self.sat.model.satnum} (orbit {self.orbit_number}, index {self.sat_index}) selected next hop of {next_hop_satnum}")
         return next_hop_satnum, comp_value
     
     # Identifies the minimum number of intra-orbit hops (East-Wes)t based on orbit number and
@@ -1683,17 +1703,15 @@ class RoutingSat:
         self.aft_port_sat_satnum = None
         self.aft_starboard_sat_satnum = None
         preceeding_orbit_satnum_list = self.check_neighboring_orbit_sat_available(self.preceeding_orbit_number) # _orbit_satnum_list has format [(satnum, interface), ...]
+        prepreceeding_orbit_satnum_list = self.check_neighboring_orbit_sat_available((self.preceeding_orbit_number - 1) % orbit_cnt, 10, 500)
         succeeding_orbit_satnum_list = self.check_neighboring_orbit_sat_available(self.succeeding_orbit_number)
+        succsucceeding_orbit_satnum_list = self.check_neighboring_orbit_sat_available((self.succeeding_orbit_number + 1) % orbit_cnt, 10, 500)
         # _orbit_satnum_list has format [(satnum, interface), ...]
         # possible interfaces: 'fore_port', 'fore_starboard', 'aft_port', 'aft_starboard'
         if len(preceeding_orbit_satnum_list) > 0:
             for satnum_tuple in preceeding_orbit_satnum_list:
                 if ignore_connection_up or (satnum_tuple[0] not in self.neigh_state_dict) or (self.neigh_state_dict[satnum_tuple[0]]['connection_up']): # if neighbor is not in neighbor state dict or is up
-                    if satnum_tuple[1] == 'port' and self.port_int_up:
-                            self.port_sat_satnum = satnum_tuple[0]
-                    elif satnum_tuple[1] == 'starboard' and self.starboard_int_up:
-                        self.starboard_sat_satnum = satnum_tuple[0]
-                    elif satnum_tuple[1] == 'fore_port' and self.fore_port_int_up:
+                    if satnum_tuple[1] == 'fore_port' and self.fore_port_int_up:
                         self.fore_port_sat_satnum = satnum_tuple[0]
                     elif satnum_tuple[1] == 'fore_starboard' and self.fore_starboard_int_up:
                         self.fore_starboard_sat_satnum = satnum_tuple[0]
@@ -1704,11 +1722,7 @@ class RoutingSat:
         if len(succeeding_orbit_satnum_list) > 0:
             for satnum_tuple in succeeding_orbit_satnum_list:
                 if ignore_connection_up or (satnum_tuple[0] not in self.neigh_state_dict) or (self.neigh_state_dict[satnum_tuple[0]]['connection_up']):
-                    if satnum_tuple[1] == 'port' and self.port_int_up:
-                        self.port_sat_satnum = satnum_tuple[0]
-                    elif satnum_tuple[1] == 'starboard' and self.starboard_int_up:
-                        self.starboard_sat_satnum = satnum_tuple[0]
-                    elif satnum_tuple[1] == 'fore_port' and self.fore_port_int_up:
+                    if satnum_tuple[1] == 'fore_port' and self.fore_port_int_up:
                         self.fore_port_sat_satnum = satnum_tuple[0]
                     elif satnum_tuple[1] == 'fore_starboard' and self.fore_starboard_int_up:
                         self.fore_starboard_sat_satnum = satnum_tuple[0]
@@ -1716,6 +1730,21 @@ class RoutingSat:
                         self.aft_port_sat_satnum = satnum_tuple[0]
                     elif satnum_tuple[1] == 'aft_starboard' and self.aft_starboard_int_up:
                         self.aft_starboard_sat_satnum = satnum_tuple[0]
+        if len(prepreceeding_orbit_satnum_list) > 0:
+            for satnum_tuple in preceeding_orbit_satnum_list:
+                if ignore_connection_up or (satnum_tuple[0] not in self.neigh_state_dict) or (self.neigh_state_dict[satnum_tuple[0]]['connection_up']): # if neighbor is not in neighbor state dict or is up
+                    if satnum_tuple[1] == 'port' and self.port_int_up:
+                            self.port_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'starboard' and self.starboard_int_up:
+                        self.starboard_sat_satnum = satnum_tuple[0]
+        if len(succsucceeding_orbit_satnum_list) > 0:
+            for satnum_tuple in succeeding_orbit_satnum_list:
+                if ignore_connection_up or (satnum_tuple[0] not in self.neigh_state_dict) or (self.neigh_state_dict[satnum_tuple[0]]['connection_up']):
+                    if satnum_tuple[1] == 'port' and self.port_int_up:
+                        self.port_sat_satnum = satnum_tuple[0]
+                    elif satnum_tuple[1] == 'starboard' and self.starboard_int_up:
+                        self.starboard_sat_satnum = satnum_tuple[0]
+
 
     def update_internal_constellation_link_state_dict(self, update_neighbor_list = True):
         if self.is_disrupted:
@@ -2484,7 +2513,7 @@ def get_sat_distance_and_rate_by_satnum(sat1_satnum, sat2_satnum): # returns dis
     return distance, (distance_next-distance)
 
 def apply_disruption_schedule():
-    global cur_time_increment, disruption_schedule, num_disrupted_packets_dropped
+    global cur_time_increment, disruption_schedule, num_disrupted_packets_dropped, disrupted_regions_dict
 
     interface_names = six_interface_names # will need to change this if using differnent number of interfaces
 
@@ -2542,10 +2571,62 @@ def apply_disruption_schedule():
                     disrupted_links = random.sample(list(range(num_links)), num_selected)
                     for link in disrupted_links:
                         if r_sat.sat.model.satnum not in cur_link_disruption_dict:
-                            cur_link_disruption_dict[r_sat.sat.model.satnum] = [(link, 1)]
+                            cur_link_disruption_dict[r_sat.sat.model.satnum] = [(link, disruption_duration)]
                         else:
-                            cur_link_disruption_dict[r_sat.sat.model.satnum].append((link, 1))
+                            cur_link_disruption_dict[r_sat.sat.model.satnum].append((link, disruption_duration))
                     print(f"\t::apply_disruption_schedule:: Type I disruption applied to sat {r_sat.sat.model.satnum} for links: {cur_link_disruption_dict[r_sat.sat.model.satnum]}")
+            elif disruption[0] == 'type_II':
+                _, disruption_location, disruption_intensity, disruption_coverage, disruption_duration = disruption
+                candidate_satnum_list = []
+                for r_sat in sat_object_list: # find the satellites impacted by the disruption
+                    topo_pos = (r_sat.sat - disruption_location).at(cur_time)
+                    elev, _, _ = topo_pos.altaz()
+                    if elev.degrees > disruption_coverage:
+                        candidate_satnum_list.append(r_sat.sat.model.satnum)
+                num_candidate_sats = len (candidate_satnum_list)
+                num_disrupted_sats = math.floor(num_candidate_sats * disruption_intensity)
+                print(f"\t::apply_disruption_schedule:: Type II disruption applied to {num_disrupted_sats} satellites")
+                for _ in range(num_disrupted_sats):
+                    disrupted_sat_index = get_r_random (num_candidate_sats)
+                    #disrupted_r_sat_list.append(candidate_r_sat_list[disrupted_sat_index])
+                    cur_sat_disruption_dict[candidate_satnum_list[disrupted_sat_index]] = 1 # set disruption duration to 1 time increment
+            elif disruption[0] == 'type_III':
+                _, disruption_location, disruption_intensity, disruption_coverage = disruption
+                candidate_satnum_list = []
+                for r_sat in sat_object_list: # find the satellites impacted by the disruption
+                    topo_pos = (r_sat.sat - disruption_location).at(cur_time)
+                    elev, _, _ = topo_pos.altaz()
+                    if elev.degrees > disruption_coverage:
+                        candidate_satnum_list.append(r_sat.sat.model.satnum)
+                num_candidate_sats = len (candidate_satnum_list)
+                num_disrupted_sats = math.floor(num_candidate_sats * disruption_intensity)
+                print(f"\t::apply_disruption_schedule:: Type III disruption applied to {num_disrupted_sats} satellites")
+                for _ in range(num_disrupted_sats):
+                    disrupted_sat_index = get_r_random (num_candidate_sats)
+                    #disrupted_r_sat_list.append(candidate_r_sat_list[disrupted_sat_index])
+                    cur_sat_disruption_dict[candidate_satnum_list[disrupted_sat_index]] = int((num_time_intervals + starting_time_increment) * 1.5) # set disruption duration to 1.5 times the number of time increments
+            elif disruption[0] == 'type_IV':
+                _, disruption_intensity, disruption_duration = disruption
+                num_disrupted_sats = math.floor(len(sat_object_list) * disruption_intensity)
+                for _ in range(num_disrupted_sats):
+                    disrupted_satnum = get_r_random (num_sats)
+                    cur_sat_disruption_dict[disrupted_satnum] = disruption_duration
+                print (f"\t::apply_disruption_schedule:: Type IV disruption applied to {num_disrupted_sats} satellites")
+            elif disruption[0] == 'type_V':
+                _, disruption_intensity, disruption_duration = disruption
+                num_avail_links = len (interface_names)
+                for r_sat in sat_object_list:
+                    num_disrupted_links = math.floor(num_avail_links * disruption_intensity)
+                    disrupted_link_index_list = []
+                    for _ in range(num_disrupted_links):
+                        disrupted_link_index_list.append(get_r_random(num_avail_links))
+                    for link_index in disrupted_link_index_list:
+                        if r_sat.sat.model.satnum not in cur_link_disruption_dict:
+                            cur_link_disruption_dict[r_sat.sat.model.satnum] = [(link_index, disruption_duration)]
+                        else:
+                            cur_link_disruption_dict[r_sat.sat.model.satnum].append((link_index, disruption_duration))
+                    print(f"\t::apply_disruption_schedule:: Type V disruption applied to sat {r_sat.sat.model.satnum} for links: {cur_link_disruption_dict[r_sat.sat.model.satnum]}")
+
 
     # loop through all satellites and update ongoing disruptions, remove expired disruptions and apply new disruptions as appropriate
     for r_sat in sat_object_list:
@@ -2653,6 +2734,8 @@ def increment_time():
                     print(f"::increment_time:: Packet dropped due to TTL for satnum: {r_sat.sat.model.satnum}, location: {lat}, {lon} (old TTL: {old_TTL} - time_increment: {time_interval} = {packet['TTL']})")
                     if csv_output:
                         csv_ttl.write(f"{cur_time_increment},{r_sat.sat.model.satnum}, {lat}, {lon},{packet['prev_hop_list']}\n")
+                    if draw_static_orbits:
+                        draw_static_plot(packet['prev_hop_list'], terminal_list = [packet['source_gs'], packet['dest_gs']], title=f"Distributed link-state {routing_name}, {len(packet['prev_hop_list'])} hops, total distance: {int(packet['distance_traveled'])}km", draw_lines = True, draw_sphere = True)
                     drop_packet_list.append(packet)
                     num_max_TTL_packets_dropped += 1
                     #r_sat.packet_qu.remove(packet)
@@ -2833,14 +2916,21 @@ def draw_connectivity_plot (title = 'Connectivity Plot', draw_sphere = True, dra
     ax.set_zlim3d(ax_min, ax_max)
 
     if draw_sphere:
-        # referencing: https://www.tutorialspoint.com/plotting-points-on-the-surface-of-a-sphere-in-python-s-matplotlib
-        r = 6378.137
-        u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:10j]
-        x = np.cos(u) * np.sin(v)
-        y = np.sin(u) * np.sin(v)
-        z = np.cos(v)
-        #ax.plot_wireframe(x*r, y*r, z*r, color="red", zorder=0)
-        ax.plot_surface(x*r, y*r, z*r)    
+        if True:
+            print("::draw_connectivity_plot:: Drawing sphere with Basemap")
+            m = Basemap(projection='ortho', lat_0=40, lon_0=-70, rsphere=6371200., resolution='l', ax=ax)
+            m.drawmapboundary(fill_color=(200/255, 204/255, 208/255), linewidth=0)
+            m.fillcontinents(color='white', lake_color='lightgray', zorder=0)
+        else:
+            print("::draw_connectivity_plot:: Drawing sphere without Basemap")
+            # referencing: https://www.tutorialspoint.com/plotting-points-on-the-surface-of-a-sphere-in-python-s-matplotlib
+            r = 6378.137
+            u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:10j]
+            x = np.cos(u) * np.sin(v)
+            y = np.sin(u) * np.sin(v)
+            z = np.cos(v)
+            #ax.plot_wireframe(x*r, y*r, z*r, color="red", zorder=0)
+            ax.plot_surface(x*r, y*r, z*r)    
     ax.scatter(x_array, y_array, z_array, c=color_array, zorder = 10)
     if draw_lines:
         ax.plot(x_array, y_array, z_array, color = 'black', zorder = 5)
@@ -2917,21 +3007,26 @@ def draw_static_plot(satnum_list, terminal_list = [], title='figure', draw_lines
     ax = fig.add_subplot(111, projection='3d')
     ax.set_title(title)
     # hardcode the xyz limites to keep all satellite plots on same scale
-    ax_min = -6000
-    ax_max = 6000
+    ax_min = -6000 # in km
+    ax_max = 6000 # in km
     ax.set_xlim3d(ax_min, ax_max)
     ax.set_ylim3d(ax_min, ax_max)
     ax.set_zlim3d(ax_min, ax_max)
 
     if draw_sphere:
-        # referencing: https://www.tutorialspoint.com/plotting-points-on-the-surface-of-a-sphere-in-python-s-matplotlib
-        r = 6378.137
-        u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:10j]
-        x = np.cos(u) * np.sin(v)
-        y = np.sin(u) * np.sin(v)
-        z = np.cos(v)
-        #ax.plot_wireframe(x*r, y*r, z*r, color="red", zorder=0)
-        ax.plot_surface(x*r, y*r, z*r)    
+        if True:
+            m = Basemap(projection='ortho', lat_0=40, lon_0=-70, resolution='l', ax=ax)
+            m.drawmapboundary(fill_color=(200/255, 204/255, 208/255), linewidth=0)
+            m.fillcontinents(color='white', lake_color='lightgray', zorder=0)
+        else:
+            # referencing: https://www.tutorialspoint.com/plotting-points-on-the-surface-of-a-sphere-in-python-s-matplotlib
+            r = 6378.137 # radius of earth in km
+            u, v = np.mgrid[0:2*np.pi:20j, 0:np.pi:10j]
+            x = np.cos(u) * np.sin(v)
+            y = np.sin(u) * np.sin(v)
+            z = np.cos(v)
+            #ax.plot_wireframe(x*r, y*r, z*r, color="red", zorder=0)
+            ax.plot_surface(x*r, y*r, z*r)    
     ax.scatter(x_array, y_array, z_array, c=color_array, zorder = 10)
     if draw_lines:
         ax.plot(x_array, y_array, z_array, color = 'black', zorder = 5)
@@ -4136,11 +4231,16 @@ def build_type_x_disruption_schedule():
             exit()
         build_type_I_disruption_schedule(starting_interval, disruption_location, disruption_intensity, disruption_coverage, disruption_duration)
     elif disruption_schedule_method == 'type_II':
-        if len(disruption_options) != 4:
-            print(f'Error: Invalid disruption options for type_I disruption schedule.\n\tMust specify: startingInterval,disruptionLocationName,disruptionCoverage,disruptionDuration.\n\tReceived: {disruption_options_string}')
+        if len(disruption_options) != 5:
+            print(f'Error: Invalid disruption options for type_II disruption schedule.\n\tMust specify: startingInterval,disruptionLocationName,disruptionInstensity,disruptionCoverage,disruptionDuration.\n\tReceived: {disruption_options_string}')
             exit()
-        starting_interval, disruption_location_name, disruption_coverage, disruption_duration = disruption_options
+        starting_interval, disruption_location_name, disruption_intensity, disruption_coverage, disruption_duration = disruption_options
         starting_interval = int(starting_interval)
+        disruption_intensity = int(disruption_intensity)
+        if disruption_intensity < 0 or disruption_intensity > 100:
+            print(f'Error: Invalid disruption intensity for type_II disruption schedule.\n\tMust be between 0 and 100.\n\tReceived: {disruption_intensity}')
+            exit()
+        disruption_intensity = float(disruption_intensity/100)
         disruption_coverage = int(disruption_coverage)
         disruption_duration = int(disruption_duration)
         location_found = False
@@ -4150,9 +4250,49 @@ def build_type_x_disruption_schedule():
                 location_found = True
                 break
         if not location_found:
-            print(f'Error: Invalid disruption location for type_I disruption schedule.\n\tMust be a valid location defined in the locations file.\n\tReceived: {disruption_location_name}')
+            print(f'Error: Invalid disruption location for type_II disruption schedule.\n\tMust be a valid location defined in the locations file.\n\tReceived: {disruption_location_name}')
             exit()
-        build_type_II_disruption_schedule(starting_interval, disruption_location, disruption_coverage, disruption_duration)
+        build_type_II_disruption_schedule(starting_interval, disruption_location, disruption_intensity, disruption_coverage, disruption_duration)
+    elif disruption_schedule_method == 'type_III':
+        if len(disruption_options) != 4:
+            print(f'Error: Invalid disruption options for type_III disruption schedule.\n\tMust specify: startingInterval,disruptionLocationName,disruptionIntensity,disruptionCoverage.\n\tReceived: {disruption_options_string}')
+            exit()
+        starting_interval, disruption_intensity, disruption_coverage = disruption_options
+        starting_interval = int(starting_interval)
+        disruption_intensity = int(disruption_intensity)
+        if disruption_intensity < 0 or disruption_intensity > 100:
+            print(f'Error: Invalid disruption intensity for type_III disruption schedule.\n\tMust be between 0 and 100.\n\tReceived: {disruption_intensity}')
+            exit()
+        disruption_intensity = float(disruption_intensity/100)
+        disruption_coverage = int(disruption_coverage)
+        build_type_III_disruption_schedule(starting_interval, disruption_location, disruption_intensity, disruption_coverage)
+    elif disruption_schedule_method == 'type_IV':
+        if len(disruption_options) != 3:
+            print(f'Error: Invalid disruption options for type_IV disruption schedule.\n\tMust specify: startingInterval,disruptionIntensity,disruptionDuration.\n\tReceived: {disruption_options_string}')
+            exit ()
+        starting_interval, disruption_intensity, disruption_duration = disruption_options
+        starting_interval = int(starting_interval)
+        disruption_intensity = int(disruption_intensity)
+        if disruption_intensity < 0 or disruption_intensity > 100:
+            print(f'Error: Invalid disruption intensity for type_I disruption schedule.\n\tMust be between 0 and 100.\n\tReceived: {disruption_intensity}')
+            exit()
+        disruption_intensity = float(disruption_intensity/100)
+        disruption_duration = int(disruption_duration)
+        build_type_IV_disruption_schedule(starting_interval, disruption_intensity, disruption_duration)
+    elif disruption_schedule_method == 'type_V':
+        if len (disruption_options) != 3:
+            print(f"Error: Invalid disruption options for type_V disruption schedule.\n\tMust specify: startingInterval,disruptionIntensity,disruptionDuration.\n\tReceived: {disruption_options_string}")
+            exit ()
+        starting_interval, disruption_intensity, disruption_duration = disruption_options
+        starting_interval = int(starting_interval)
+        disruption_intensity = int(disruption_intensity)
+        if disruption_intensity < 0 or disruption_intensity > 100:
+            print (f"Error: Invalid disruption intensity for type_V disruption schedule.\n\tMust be between 0 and 100.\n\tReceived: {disruption_intensity}")
+            exit ()
+        disruption_intensity = float(disruption_intensity/100)
+        disruption_duration = int(disruption_duration)
+        build_type_V_disruption_schedule(starting_interval, disruption_intensity, disruption_duration)
+
 
 # Generates disruptions originating from disruption_location
 # disruption_intensity is percent value ranging from 0 - 100 (impacts the number of links of disrupted for impacted satellites)
@@ -4163,9 +4303,24 @@ def build_type_I_disruption_schedule(starting_interval, disruption_location, dis
     for interval in disruption_intervals:
         disruption_schedule[interval] = [['type_I', disruption_location, disruption_intensity, disruption_coverage, 1]]
 
-def build_type_II_disruption_schedule(starting_interval, disruption_location, disruption_coverage, disruption_duration):
+def build_type_II_disruption_schedule(starting_interval, disruption_location, disruption_intensity, disruption_coverage, disruption_duration):
     global disruption_schedule
-    disruption_schedule[starting_interval] = [['type_II', disruption_location, disruption_coverage, disruption_duration]]
+    disruption_intervals = list(range(starting_interval, starting_interval + disruption_duration))
+    for interval in disruption_intervals:
+        disruption_schedule[interval] = [['type_II', disruption_location, disruption_intensity, disruption_coverage, 1]]
+
+def build_type_III_disruption_schedule(starting_interval, disruption_location, disruption_intensity, disruption_coverage):
+    global disruption_schedule
+    disruption_schedule[starting_interval] = [['type_III', disruption_location, disruption_intensity, disruption_coverage]]
+
+def build_type_IV_disruption_schedule(starting_interval, disruption_intensity, disruption_duration):
+    global disruption_schedule
+    disruption_schedule[starting_interval] = [['type_IV', disruption_intensity, disruption_duration]]
+
+def build_type_V_disruption_schedule (starting_interval, disruption_intensity, disruption_duraction):
+    global disruption_schedule
+    disruption_schedule[starting_interval] = [['type_V', disruption_intensity, disruption_duraction]]
+
 # generates disruptions based on percentage of links or satellites disruptioned
 # default is 30% of links disrupted for 1 time interval, occuring once
 # disruption_type: 'link' or sat'
@@ -4425,7 +4580,8 @@ def build_NS_old_world_equator_packet_schedule():
 
 def build_NS_new_world_equator_packet_schedule():
     # Using Rio Gallegos and Calgary
-    city_list = [Rio_Gallegos, Calgary]
+    #city_list = [Rio_Gallegos, Calgary]
+    city_list = [Comodoro_Rivadavia, Montreal]
     build_2_city_packet_schedule(city_list)
 
 def build_SE_to_NW_packet_schedule():
@@ -4717,6 +4873,71 @@ def print_satellite_neighbor_bearings_over_time(r_sat, num_time_increments):
         if csv_output:
             csv_file.write(string + "\n")
         increment_time()
+"""
+def print_satellite_neighbor_distance_over_time (target1_satnum, target2_satnum, num_time_increments):
+    global csv_file
+    target_1_r_sat = get_routing_sat_obj_by_satnum(target1_satnum)
+    target_2_r_sat = get_routing_sat_obj_by_satnum(target2_satnum)
+    print("::::: SATELLITE NEIGHBOR DISTANCE OVER TIME :::::")
+    print(f"Target satellites: {target1_satnum} (orbit: {target_1_r_sat.orbit_number}, orbit index: {target_1_r_sat.sat_index}), {target2_satnum} (orbit: {target_2_r_sat.orbit_number}, orbit index: {target_2_r_sat.sat_index})")
+    string = "Time_increment, Sat1_lat, Sat2_lat, Distance_km, Rate, Bearing"
+    print(string)
+    if csv_output:
+        csv_file.write(string + "\n")
+    for _ in range(num_time_increments):
+        distance, rate = get_sat_distance_and_rate_by_satnum (target1_satnum, target2_satnum)
+        target_1_heading = get_heading_by_satnum_degrees(target1_satnum)
+        target_2_rel_bearing = get_rel_bearing_by_satnum_degrees (target1_satnum, target2_satnum, target_1_heading)
+        string = f"{cur_time_increment}, {target_1_r_sat.get_sat_lat_degrees():.2f}, {target_2_r_sat.get_sat_lat_degrees():.2f}, {distance:.0f}, {rate:.2f}, {target_2_rel_bearing:.2f}"
+        print(string)
+        if csv_output:
+            csv_file.write(string + "\n")
+        increment_time()
+    return
+"""
+def print_satellite_neighbor_distance_over_time(r_sat, num_time_increments):
+    global csv_file
+    print("::::: SATELLITE NEIGHBOR DISTANCE OVER TIME :::::")
+    string = "Satellite number,\tLatitude,\tFore,\tAft,\tPort,\tStarboard,\tFore Port,\tFore Starboard,\tAft Port,\tAft Starboard"
+    print(string)
+    if csv_output:
+        csv_file.write(string + "\n")
+    for _ in range(num_time_increments):
+        r_sat.update_current_neighbor_sats()
+        string = get_sat_neighbor_distance_string(r_sat)
+        print(string)
+        if csv_output:
+            csv_file.write(string + "\n")
+        increment_time()
+
+def get_sat_neighbor_distance_string(r_sat):
+    lat = r_sat.get_sat_lat_degrees()
+    fore_distance = None
+    aft_distance = None
+    port_distance = None
+    starboard_distance = None
+    fore_port_distance = None
+    fore_starboard_distance = None
+    aft_port_distance = None
+    aft_starboard_distance = None
+    if r_sat.fore_sat_satnum != None:
+        fore_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, r_sat.fore_sat_satnum) 
+    if r_sat.aft_sat_satnum != None:
+        aft_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, r_sat.aft_sat_satnum)
+    if r_sat.port_sat_satnum != None:
+        port_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, r_sat.port_sat_satnum)
+    if r_sat.starboard_sat_satnum != None:
+        starboard_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, r_sat.starboard_sat_satnum)
+    if r_sat.fore_port_sat_satnum != None:
+        fore_port_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, r_sat.fore_port_sat_satnum)
+    if r_sat.fore_starboard_sat_satnum != None:
+        fore_starboard_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, r_sat.fore_starboard_sat_satnum)
+    if r_sat.aft_port_sat_satnum != None:
+        aft_port_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, r_sat.aft_port_sat_satnum)
+    if r_sat.aft_starboard_sat_satnum != None:
+        aft_starboard_distance, _ = get_sat_distance_and_rate_by_satnum(r_sat.sat.model.satnum, r_sat.aft_starboard_sat_satnum)
+    string = f"{r_sat.sat.model.satnum},{lat:.2f},{r_sat.fore_sat_satnum},{fore_distance},{r_sat.aft_sat_satnum},{aft_distance},{r_sat.port_sat_satnum},{port_distance},{r_sat.starboard_sat_satnum},{starboard_distance},{r_sat.fore_port_sat_satnum},{fore_port_distance},{r_sat.fore_starboard_sat_satnum},{fore_starboard_distance},{r_sat.aft_port_sat_satnum},{aft_port_distance},{r_sat.aft_starboard_sat_satnum},{aft_starboard_distance}"
+    return string
 
 def get_sat_neighbor_bearings_string (r_sat):
     cur_sat_heading = get_heading_by_satnum_degrees(r_sat.sat.model.satnum)
@@ -4960,6 +5181,26 @@ def advance_start_time():
     while (cur_time_increment != starting_time_increment):
         increment_time ()
 
+# ::::::: REPEATABLE RANDOM NUMBER GENERATOR :::::::
+r_random_index = 0
+
+def repeatable_random_generator (seed):
+    hash = str(seed).encode('utf-8')
+    while True:
+        hash = hashlib.md5(hash).digest()
+        for c in hash:
+            yield c
+            #yield ord(c)
+
+def get_r_random (high_val):
+    global r_random_index
+    #r_random_val = repeatable_random ('test')
+    raw_random = 0
+    for v in zip(range(10), repeatable_random_generator ('test'+str(r_random_index))):
+        raw_random += v[1]
+    r_random_index += 1
+    return raw_random % high_val
+
 # ::::::: MAIN :::::::
 def main ():
     start_run_time = time.time()
@@ -5051,8 +5292,13 @@ def main ():
             #num_time_increments = 90
             print_satellite_neighbors_over_time(sat_object_list[target_satnum], num_time_intervals)
         elif test_name == "Print Sat Neighbor Bearings Over Time":
-            target_satnum = 1003
+            target_satnum = 1000
             print_satellite_neighbor_bearings_over_time(sat_object_list[target_satnum], num_time_intervals)
+        elif test_name == "Print Sat Neighbor Distance Over Time":
+            target_satnum = 1000
+            #target2_satnum = 957
+            #print_satellite_neighbor_distance_over_time (target1_satnum, target2_satnum, num_time_intervals)
+            print_satellite_neighbor_distance_over_time (sat_object_list[target_satnum], num_time_intervals)
         elif test_name == "Dump Packet Schedule to File":
             dump_packet_schedule_to_file()
         elif test_name == "Load Packet Schedule From File":

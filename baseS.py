@@ -33,7 +33,7 @@ class baseS:
                 return "-" + self.baseS[-decimalNum // self.S] + self.dec2baseS(-decimalNum % self.S)
             return self.baseS[decimalNum // self.S] + self.dec2baseS(decimalNum % self.S)
     
-    # function to convert base 22 to integer
+    # function to convert base S to integer
     def baseS2dec(self, baseSStr):
         if baseSStr[0] == "-":
             baseSStr = baseSStr[1:]
