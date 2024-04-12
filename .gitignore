@@ -1,0 +1,8 @@
+*.csv
+*.dill
+*.txt
+outputs/*
+__pycache__/*
+myuses.dot
+myuses.html
+out.gv
