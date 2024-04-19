@@ -21,7 +21,7 @@ import getopt # for command line arguments
 import numpy as np
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import axes3d
-from mpl_toolkits.basemap import Basemap
+#from mpl_toolkits.basemap import Basemap
 from matplotlib.animation import FuncAnimation
 
 # CSV
@@ -5104,9 +5104,9 @@ def print_help(options, long_options, option_explanation):
 # parse command line arguments and set global variables as appropriate
 def parse_command_line_arguments():
     argumentList = sys.argv[1:]
-    options = "hmut:pr:i:n:odasc:k:ql:x:v:z:e:b:"
-    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "disruption_schedule_method=", "max_disruptions_per_interval", "csv_output=", "disruption_option_string=", "update_interval=", "begining_increment="]
-    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify disruption scheduling method", "specify max number of disruptions per time interval", "specify csv output file name", "specify disruption option string for methods that require it ('type,percent,duration,numIntervals')", "specify number of time increments before updating link states", "specify the time increment to start at"]
+    options = "hmut:pr:i:n:odasc:k:ql:x:v:z:e:b:g"
+    long_options = ["help", "multithreaded", "multiprocessing", "test_name=", "point_to_point", "routing=", "interval=", "num_intervals=", "plot_dropped_packets", "disruptions", "draw_static_orbits", "draw_distributed_orbits", "packet_schedule_method", "num_packets_per_interval", "qos", "disruption_schedule_method=", "max_disruptions_per_interval", "csv_output=", "disruption_option_string=", "update_interval=", "begining_increment=", "generate_topo"]
+    option_explanation = ["this help message", "run with multithreading", "run with multiprocessing", "specify test function to run (0 for no test)", "run point to point test", "specify routing method", "specify time interval between time increments", "specify number of time increments", "plot dropped packets", "do satellite disruptions", "draw static orbits", "draw distributed orbits", "specify packet scheduling method", "specify number of packets per time interval", "do qos things like congestion control", "specify disruption scheduling method", "specify max number of disruptions per time interval", "specify csv output file name", "specify disruption option string for methods that require it ('type,percent,duration,numIntervals')", "specify number of time increments before updating link states", "specify the time increment to start at", "generate topology and routing files for mininet"]
     try:
         arguments, values = getopt.getopt(argumentList, options, long_options)
     except getopt.error as err:
@@ -5176,6 +5176,9 @@ def parse_command_line_arguments():
         elif currentArgument in ("-b", "--begining_increment"):
             global starting_time_increment
             starting_time_increment = int(currentValue)
+        #elif currentArgument in ("-g", "--generate_topo"):
+            #global test_name
+            #test_name = "generate_mininet_topo"
 
 def advance_start_time():
     while (cur_time_increment != starting_time_increment):
@@ -5200,6 +5203,210 @@ def get_r_random (high_val):
         raw_random += v[1]
     r_random_index += 1
     return raw_random % high_val
+
+# Worker function for generate_mininet_topo()
+def calc_shortest_paths_from_node_old(start_node, node_list, cur_connectivity_graph):
+    from dijkstar import find_path
+    path_dict = {}
+    start_index = node_list.index(start_node)
+    for end_node in node_list[start_index+1:]:
+        path = find_path(cur_connectivity_graph, start_node, end_node)
+        path_dict[(start_node, end_node)] = path
+    return path_dict
+
+def calc_shortest_paths_from_node(start_node, node_list, cur_connectivity_graph):
+    from dijkstar import find_path
+    import copy
+    cur_connectivity_graph_cpy = copy.deepcopy(cur_connectivity_graph)
+    path_str_list = []
+    start_index = node_list.index(start_node)
+    for end_node in node_list[start_index+1:]:
+        path = find_path(cur_connectivity_graph_cpy, start_node, end_node).nodes
+        path_str_list.append(", ".join(str(sat) for sat in path))
+    return path_str_list
+    #path_dict = {}
+    #path_dict[start_node] = path_str_list
+    #return path_dict
+
+# Will build a topology based on given configuration and generate topology and routing files for use by Mininet
+def generate_mininet_topo (num_time_increments):
+    print("::::: GENERATE MININET TOPOLOGY :::::")
+    
+    topology_output_file_path = "./connectivity_matrix/fakelink/"
+    topology_file_prefix = "topology_"
+    topology_file_suffix = ".0.txt"
+    routing_output_file_path = "./routing/fakelink/"
+    routing_file_prefix = "routes_"
+    routing_file_suffix = ".0.txt"
+
+    # create output directories if they doesn't already exist
+    try:
+        os.makedirs(topology_output_file_path) 
+        print(f"Created directory: {topology_output_file_path}")
+    except FileExistsError:
+        pass
+    try:
+        os.makedirs(routing_output_file_path)
+        print(f"Created director: {routing_output_file_path}")
+    except FileExistsError:
+        pass
+
+    print("Generating connectivity_matrix files...")
+    for _ in range(num_time_increments):
+        link_list = []
+        #r_sat.update_current_neighbor_sats()
+        # Update all neighbor states for current time interval (if on update interval)
+        if cur_time_increment == 0 or cur_time_increment % link_state_update_interval == 0: # if this is the first time increment, or if it is time to advertise link states, then advertise link states
+            print(f"\n<Updating neighbor states> - Time interval: {cur_time_increment} of up to {num_time_intervals + starting_time_increment}")
+            start = time.process_time()
+            try:
+                all_sats_update_neigh_state()  # each satellite publishes it's state to it's neighbors and then the satellites process the received data
+            except KeyboardInterrupt:
+                exit()
+            compute_time = time.process_time() - start
+            print(f"\nTime to compute neighbor states: {compute_time:.0f} seconds")
+        else:
+            print(f"\n<Not updating neighbor states> - Time interval: {cur_time_increment} / Link state update interval: {link_state_update_interval}")
+        gs1 = Seattle
+        gs2 = London
+        gs1_number = len(sat_object_list)
+        gs2_number = gs1_number + 1
+        sat_over_gs1 = None
+        sat_over_gs2 = None
+        sat_to_gs1_dist = None
+        sat_to_gs2_dist = None
+        first = True
+        for i in range(len(sat_object_list)):
+            sat_object = sat_object_list[i]
+            satnum = sat_object.sat.model.satnum
+            # find satellites overhead ground stations
+            if sat_over_gs1 is None and sat_object.is_overhead_of(gs1):
+                sat_over_gs1 = satnum
+                sat_to_gs1_dist = (sat_object.sat.at(cur_time) - gs1.at(cur_time)).distance().km
+            elif sat_over_gs2 is None and sat_object.is_overhead_of(gs2):
+                sat_over_gs2 = satnum
+                sat_to_gs2_dist = (sat_object.sat.at(cur_time) - gs2.at(cur_time)).distance().km
+            # get neighbors for current satellite
+            neigh_satnum_list = sat_object.get_list_of_cur_neighbor_satnums ()
+            # for each neighbor, calculate link latency based on distance
+            for neigh_satnum in neigh_satnum_list:
+                sat1_geoc = sat_object_list[satnum].sat.at(cur_time)
+                sat2_geoc = sat_object_list [neigh_satnum].sat.at(cur_time)
+                distance = (sat1_geoc - sat2_geoc).distance().km
+                latency = (secs_per_km * distance) * 1000 # latency is in ms
+                if satnum <= neigh_satnum:
+                    link_tuple = (satnum, neigh_satnum, latency, 500)
+                else:
+                    link_tuple = (neigh_satnum, satnum, latency, 500)
+                # if link tuple isn't already in link_list for this time interval, add it
+                if link_tuple not in link_list:
+                    link_list.append(link_tuple)
+        # Add link tuples to ground stations to link_list
+        if sat_over_gs1 is not None:
+            latency_to_gs1 = (secs_per_km * sat_to_gs1_dist) * 1000 # latency is in ms
+            gs1_slant_scale = min(sat_to_gs1_dist / 12000, 1) # ensuring the scale scale can't be greater than 1
+            gs1_bandwidth = 250 - (150 * gs1_slant_scale)
+            link_list.append((sat_over_gs1, gs1_number, latency_to_gs1, gs1_bandwidth))
+        if sat_over_gs2 is not None:
+            latency_to_gs2 = (secs_per_km * sat_to_gs2_dist) * 1000 # latency is in ms
+            gs2_slant_scale = min(sat_to_gs2_dist / 12000, 1) # ensuring the scale value can't be greater than 1
+            gs2_bandwidth = 250 - (150 * gs2_slant_scale)
+            link_list.append((sat_over_gs2, gs2_number, latency_to_gs2, gs2_bandwidth))
+        
+        # Write current link_list to file
+        cur_time_str = cur_time.utc_datetime().strftime("%Y_%m_%d_%H_%M_%S")
+        
+        cur_topology_output_file = topology_output_file_path + topology_file_prefix + cur_time_str + topology_file_suffix
+        print(f"Writing topology to file: {cur_topology_output_file}")
+        with open(cur_topology_output_file, "w") as file:
+            for link_tuple in link_list:
+                node1, node2, latency, bandwidth = link_tuple
+                file.write(f"{node1},{node2},{latency:.2f},{bandwidth:.2f}\n")
+        print("Finished writing topology to file")
+        
+        cur_routing_output_file = routing_output_file_path + routing_file_prefix + cur_time_str + routing_file_suffix
+        print(f"Writing to file: {cur_routing_output_file}")
+        total_sat_count = len(sat_object_list)
+        total_combination_count = int((total_sat_count * (total_sat_count-1))/2)
+        """
+        print("Generating routing matrix")
+        # Single-threaded
+        from dijkstar import Graph, find_path, NoPathError
+        cur_connectivity_graph = Graph() # Using Dijkstar library graph
+        for link_tuple in link_list:
+            node1, node2, _, _ = link_tuple
+            cur_connectivity_graph.add_edge(node1, node2, 1) # add forward link; all links weighted equally
+            cur_connectivity_graph.add_edge(node2, node1, 1) # add reverse link; all links weighted equally
+        
+        combination_counter = 0
+        with open(cur_routing_output_file, "w") as file:
+            #print("\n")
+            for source_sat in range(total_sat_count):
+                file.write(f"{source_sat}\n") # start each source sat sequence with just the sat number
+                for destination_sat in range(source_sat + 1, total_sat_count):
+                    # find path from source_sat to destination_sat
+                    combination_counter += 1
+                    try:
+                        print(f"  Finding path {combination_counter:,} of {total_combination_count:,} ({combination_counter/total_combination_count:.0f}%)", end="\r")
+                        path = find_path(cur_connectivity_graph, source_sat, destination_sat).nodes
+                    except NoPathError:
+                        print(f"No path from {source_sat} to {destination_sat}")
+                        continue
+                    except KeyboardInterrupt:
+                        print("Aborting...")
+                        exit()
+                    path_string = ", ".join(str(sat) for sat in path)
+                    file.write(f"{path_string}\n")
+        print("Finished generating routing matrix")
+        """
+        # Multi-process
+        from dijkstar import Graph
+        from concurrent.futures import ProcessPoolExecutor, as_completed
+
+        # Build the graph
+        cur_connectivity_graph = Graph() # Using Dijkstar library graph
+        for link_tuple in link_list:
+            node1, node2, _, _ = link_tuple
+            cur_connectivity_graph.add_edge(node1, node2, 1) # add forward link; all links weighted equally
+            cur_connectivity_graph.add_edge(node2, node1, 1) # add reverse link; all links weighted equally
+        
+        # make a list of all satnums in connectivity graph and sort it
+        node_list = list(cur_connectivity_graph)
+        node_list.sort()
+
+        # Use ProcessPoolExecutor to call Dijkstar in parallel
+        print("Finding routes.  May take a while...")
+        start = time.time() #time.process_time()
+        with ProcessPoolExecutor(max_workers = os.cpu_count()) as executor:
+            futures = {executor.submit(calc_shortest_paths_from_node, node, node_list, cur_connectivity_graph): node for node in node_list}
+            results = {}
+            #for future in concurrent.futures.as_completed(futures):
+            for future in as_completed(futures):
+                node = futures[future]
+                try:
+                    results[node] = future.result()
+                except Exception as exc:
+                    print(f"Node {node} generated exception: {exc}")
+        # results now contains the shortest paths between each node - output to file
+        compute_time = time.time() - start #time.process_time() - start
+        print(f"Time to calculate {total_combination_count} routes: {compute_time:.0f} seconds")
+        print(f"Writing routes to file: {cur_routing_output_file}")
+        with open(cur_routing_output_file, "w") as file:
+            #for node in results:
+            for node in (range(len(results))): # to ensure files are written in node order
+                path_string_list = results[node]
+                file.write(f"{node}\n")
+                for path_string in path_string_list:
+                    file.write(f"{path_string}\n")
+            #for path in results.values():
+            #    path_string = ", ".join(str(sat) for sat in path)
+            #    file.write(f"{path_string}\n")
+        print(f"Finished generating routing matrix for time: {cur_time_str}")
+        
+        increment_time()
+    
+    print("Finished generating topology files")
+    exit()
 
 # ::::::: MAIN :::::::
 def main ():
@@ -5313,6 +5520,8 @@ def main ():
             sat_connectivity_plot_test(False)
         elif test_name == "Test Overhead Sats":
             overhead_sat_test ()
+        elif test_name == "generate_mininet_topo":
+            generate_mininet_topo (num_time_intervals)
         else:
             print(f"Unknown test name specified: {test_name}")
         if csv_output:
