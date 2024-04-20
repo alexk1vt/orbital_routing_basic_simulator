@@ -5232,10 +5232,10 @@ def calc_shortest_paths_from_node(start_node, node_list, cur_connectivity_graph)
 def generate_mininet_topo (num_time_increments):
     print("::::: GENERATE MININET TOPOLOGY :::::")
     
-    topology_output_file_path = "./connectivity_matrix/fakelink/"
+    topology_output_file_path = "./connectivity_matrix/fauxlink/"
     topology_file_prefix = "topology_"
     topology_file_suffix = ".0.txt"
-    routing_output_file_path = "./routing/fakelink/"
+    routing_output_file_path = "./routing/fauxlink/"
     routing_file_prefix = "routes_"
     routing_file_suffix = ".0.txt"
 
